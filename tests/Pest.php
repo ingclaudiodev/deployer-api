@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Passport\Client;
 use Tests\TestCase;
 
 /*
@@ -44,7 +45,11 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Passport can only mint personal access tokens when a personal access client exists,
+ * and the in-memory test database starts without one.
+ */
+function createPersonalAccessClient(): Client
 {
-    // ..
+    return Client::factory()->asPersonalAccessTokenClient()->create();
 }

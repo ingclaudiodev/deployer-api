@@ -1,5 +1,6 @@
 <?php
 
+use App\Auth\Adapters\PasswordAdapter;
 use App\Models\User;
 
 return [
@@ -42,6 +43,55 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        'api' => [
+            'driver' => 'passport',
+            'provider' => 'users',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication Adapters
+    |--------------------------------------------------------------------------
+    |
+    | Each adapter is one way a user can prove their identity to the API
+    | (see App\Auth\Contracts\AuthenticationAdapter). All of them end in the
+    | same Passport token. Add OAuth providers here as they are implemented.
+    |
+    */
+
+    'adapters' => [
+        'password' => PasswordAdapter::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Tokens
+    |--------------------------------------------------------------------------
+    |
+    | Name given to the Passport personal access tokens issued to clients and
+    | how long they stay valid before the user must sign in again.
+    |
+    */
+
+    'tokens' => [
+        'name' => env('AUTH_TOKEN_NAME', 'deployer-client'),
+        'expire_days' => (int) env('AUTH_TOKEN_EXPIRE_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Throttling
+    |--------------------------------------------------------------------------
+    |
+    | Attempts per minute allowed on the public auth endpoints (login, register,
+    | password reset), counted per email + IP. See the "auth" rate limiter.
+    |
+    */
+
+    'throttle' => [
+        'per_minute' => (int) env('AUTH_THROTTLE_PER_MINUTE', 10),
     ],
 
     /*
@@ -98,6 +148,7 @@ return [
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
             'expire' => 60,
             'throttle' => 60,
+            'frontend_path' => env('AUTH_RESET_PASSWORD_PATH', '/restablecer'),
         ],
     ],
 
