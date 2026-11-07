@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\User;
-use Illuminate\Auth\Notifications\ResetPassword;
+use App\Notifications\Auth\ResetPasswordNotification;
 use Illuminate\Support\Facades\Notification;
 
 test('a known email gets a reset link that opens the frontend', function (): void {
@@ -14,8 +14,11 @@ test('a known email gets a reset link that opens the frontend', function (): voi
         ->assertOk()
         ->assertJsonStructure(['message']);
 
-    Notification::assertSentTo($user, ResetPassword::class, function (ResetPassword $notification) use ($user): bool {
-        $url = $notification->toMail($user)->actionUrl;
+    Notification::assertSentTo($user, ResetPasswordNotification::class, function (ResetPasswordNotification $notification) use ($user): bool {
+        $mail = $notification->toMail($user);
+        $url = $mail->actionUrl;
+
+        expect($mail->subject)->toContain('Restablece tu contraseña');
 
         return str_starts_with($url, 'https://app.deployer.test/restablecer?token=')
             && str_contains($url, 'email=dev%40acme.com');
