@@ -4,6 +4,8 @@ use App\Models\User;
 
 beforeEach(function (): void {
     createPersonalAccessClient();
+    // These tests open sessions through the login endpoint; the second factor is covered elsewhere.
+    config()->set('auth.two_factor.enabled', false);
 });
 
 test('logout revokes only the token used on the request', function (): void {

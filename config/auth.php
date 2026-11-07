@@ -96,6 +96,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Two-Factor Authentication (email one-time code)
+    |--------------------------------------------------------------------------
+    |
+    | After the password is accepted, a numeric code is emailed and the session
+    | only opens once it is confirmed. "expire_minutes" is how long a code lives,
+    | "max_attempts" how many wrong codes burn the challenge, "resend_seconds"
+    | the minimum wait before another email, "verify_per_minute" the rate limit
+    | on confirm/resend requests per challenge and ip, and "trust_days" how long
+    | a device remembered after a confirmed code skips the code.
+    |
+    */
+
+    'two_factor' => [
+        'enabled' => (bool) env('AUTH_TWO_FACTOR_ENABLED', true),
+        'code_length' => (int) env('AUTH_TWO_FACTOR_CODE_LENGTH', 6),
+        'expire_minutes' => (int) env('AUTH_TWO_FACTOR_EXPIRE_MINUTES', 10),
+        'max_attempts' => (int) env('AUTH_TWO_FACTOR_MAX_ATTEMPTS', 5),
+        'resend_seconds' => (int) env('AUTH_TWO_FACTOR_RESEND_SECONDS', 60),
+        'verify_per_minute' => (int) env('AUTH_TWO_FACTOR_VERIFY_PER_MINUTE', 10),
+        'trust_days' => (int) env('AUTH_TWO_FACTOR_TRUST_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | User Providers
     |--------------------------------------------------------------------------
     |

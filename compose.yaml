@@ -1,0 +1,71 @@
+# Entorno local de deployer-api: Octane (Swoole) + Horizon + scheduler + Redis.
+#
+#   docker compose up -d --build
+#   docker compose exec app php artisan octane:reload   # tras cambiar código PHP
+#
+# La base de datos NO corre en compose: la app se conecta con los DB_* del .env.
+# Para llegar al Postgres de la máquina anfitriona usa DB_HOST=host.docker.internal
+# (dentro de un contenedor 127.0.0.1 es el propio contenedor).
+# REDIS_HOST se sobreescribe para apuntar al servicio redis de compose.
+
+name: deployer
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+    target: dev
+  image: deployer-api:dev
+  env_file: .env
+  environment:
+    REDIS_HOST: redis
+    PHP_OPCACHE_VALIDATE_TIMESTAMPS: 1
+  volumes:
+    - .:/var/www/html
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  app:
+    <<: *app
+    command: octane
+    ports:
+      - "${APP_PORT:-8000}:8000"
+
+  horizon:
+    <<: *app
+    command: horizon
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  scheduler:
+    <<: *app
+    command: scheduler
+    healthcheck:
+      disable: true
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "${FORWARD_REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis-data:

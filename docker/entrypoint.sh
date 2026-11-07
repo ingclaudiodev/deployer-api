@@ -1,0 +1,68 @@
+#!/bin/sh
+# Punto de entrada del contenedor.
+#
+#   entrypoint octane      -> servidor HTTP (Octane + Swoole)   [por defecto]
+#   entrypoint horizon     -> workers de colas
+#   entrypoint scheduler   -> planificador (schedule:work)
+#   entrypoint <comando>   -> cualquier otro comando, tal cual
+#
+# Variables que lo controlan (todas opcionales):
+#   PORT / OCTANE_PORT, OCTANE_WORKERS, OCTANE_TASK_WORKERS, OCTANE_MAX_REQUESTS,
+#   OCTANE_WATCH=true (requiere chokidar en node_modules), RUN_MIGRATIONS=true.
+set -eu
+
+cd /var/www/html
+
+if [ ! -f vendor/autoload.php ]; then
+    echo "[entrypoint] vendor/ no existe: ejecutando composer install"
+    composer install --prefer-dist --no-progress --no-interaction
+fi
+
+mkdir -p storage/app/public storage/framework/cache/data storage/framework/sessions \
+    storage/framework/testing storage/framework/views storage/logs bootstrap/cache
+
+# Claves de Passport: en producción deben venir por PASSPORT_PRIVATE_KEY/PASSPORT_PUBLIC_KEY
+# (o estar montadas en storage/). Generarlas al vuelo invalidaría todos los tokens en cada
+# despliegue o arranque en frío, por eso solo se crean automáticamente fuera de producción.
+if [ -z "${PASSPORT_PRIVATE_KEY:-}" ] && [ ! -f storage/oauth-private.key ]; then
+    if [ "${APP_ENV:-production}" = "production" ]; then
+        echo "[entrypoint] ERROR: faltan las claves de Passport (PASSPORT_PRIVATE_KEY/PASSPORT_PUBLIC_KEY o storage/oauth-*.key)" >&2
+        exit 1
+    fi
+    echo "[entrypoint] generando claves de Passport (solo entorno no productivo)"
+    php artisan passport:keys --no-interaction
+fi
+
+if [ "${APP_ENV:-production}" = "production" ]; then
+    php artisan optimize --no-interaction
+else
+    php artisan optimize:clear --no-interaction
+fi
+
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    php artisan migrate --force --no-interaction
+fi
+
+case "${1:-octane}" in
+    octane)
+        set -- php artisan octane:start \
+            --server=swoole \
+            --host=0.0.0.0 \
+            --port="${OCTANE_PORT:-${PORT:-8000}}" \
+            --workers="${OCTANE_WORKERS:-auto}" \
+            --task-workers="${OCTANE_TASK_WORKERS:-auto}" \
+            --max-requests="${OCTANE_MAX_REQUESTS:-500}"
+
+        if [ "${OCTANE_WATCH:-false}" = "true" ]; then
+            set -- "$@" --watch
+        fi
+        ;;
+    horizon)
+        set -- php artisan horizon
+        ;;
+    scheduler)
+        set -- php artisan schedule:work
+        ;;
+esac
+
+exec "$@"

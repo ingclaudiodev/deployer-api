@@ -4,14 +4,19 @@ namespace App\Notifications\Auth;
 
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 
 /**
  * Deployer's own wording for the password reset email. The link itself comes from
  * ResetPassword::createUrlUsing(), configured in AuthServiceProvider, so it opens the SPA.
+ * Queued, like every outbound email of this app.
  */
-class ResetPasswordNotification extends ResetPassword
+class ResetPasswordNotification extends ResetPassword implements ShouldQueue
 {
+    use Queueable;
+
     /**
      * @param  User  $notifiable
      */

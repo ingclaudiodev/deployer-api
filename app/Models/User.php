@@ -7,7 +7,9 @@ use App\Notifications\Auth\ResetPasswordNotification;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -23,6 +25,8 @@ use Laravel\Passport\HasApiTokens;
  * @property string|null $remember_token
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
+ * @property-read Collection<int, TwoFactorChallenge> $twoFactorChallenges
+ * @property-read Collection<int, TrustedDevice> $trustedDevices
  */
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
@@ -42,6 +46,26 @@ class User extends Authenticatable implements OAuthenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Pending and past second-factor steps of this user's sign-ins.
+     *
+     * @return HasMany<TwoFactorChallenge, $this>
+     */
+    public function twoFactorChallenges(): HasMany
+    {
+        return $this->hasMany(TwoFactorChallenge::class);
+    }
+
+    /**
+     * Devices remembered after a confirmed code; the password alone signs in from them.
+     *
+     * @return HasMany<TrustedDevice, $this>
+     */
+    public function trustedDevices(): HasMany
+    {
+        return $this->hasMany(TrustedDevice::class);
     }
 
     /**
