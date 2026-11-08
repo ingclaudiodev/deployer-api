@@ -4,6 +4,15 @@ Manifiestos de deployer-api para el clúster que administra `../cluster-deployer
 (HAProxy, KEDA, Argo Rollouts, GMP, Gateway API). Una carpeta por servicio; el número es el
 orden de aplicación. El tag de la imagen se fija una sola vez en `k8s/kustomization.yaml`.
 
+## Versión de la imagen
+
+El tag de la imagen **es la versión de `version.txt`** (semver, p. ej. `1.4.2`), nunca `:latest`
+ni el sha a secas. Cloud Build (`cloudbuild.yaml`) sube dos tags por build: `:<version>`, que es el
+que despliega kustomize, y `:<version>-<sha>`, para saber qué commit exacto produjo esa versión
+(también va en las etiquetas OCI `org.opencontainers.image.version` y `.revision`). Para publicar:
+subir `version.txt`, commitear y correr `sh k8s/deploy.sh`, que exige árbol commiteado y se niega a
+reconstruir una versión que ya existe en Artifact Registry (`FORCE=1` para republicarla a propósito).
+
 | # | Carpeta | Qué es | Depende de |
 |---|---|---|---|
 | 1 | `base/` | Namespace `deployer-api` (ComputeClass `n4-hyperdisk` por defecto, etiqueta del Gateway), ConfigMap `deployer-api-env`, plantilla del Secret `deployer-api-secrets` | cluster-deployer pasos 1-6c |
@@ -46,9 +55,10 @@ gcloud artifacts repositories create deployer --repository-format=docker --locat
 # 1. Usuario de base de datos propio (Cloud SQL deployerbd, Postgres 18, por Private Service Connect)
 gcloud sql users create deployer --instance=deployerbd --password='<generar-una-clave>'
 
-# 2. Imagen (Cloud Build: los nodos son amd64; la imagen local del Mac es arm64)
-TAG=$(git rev-parse --short HEAD)
-gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$TAG .
+# 2. Imagen (Cloud Build: los nodos son amd64; la imagen local del Mac es arm64). El tag es la
+#    versión de version.txt; `sh k8s/deploy.sh` hace esto y los pasos 6 y 7. A mano:
+TAG=$(tr -d '[:space:]' < version.txt); SHA=$(git rev-parse --short HEAD)
+gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$TAG,_SHA=$SHA .
 (cd k8s && kustomize edit set image us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api=:$TAG)
 
 # 3. Namespace + config
@@ -90,15 +100,15 @@ kubectl -n deployer-api exec deploy/horizon -- php artisan horizon:status    # H
 ## Cada despliegue
 
 ```sh
-TAG=$(git rev-parse --short HEAD)
-gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$TAG .
-(cd k8s && kustomize edit set image us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api=:$TAG)
-kubectl -n deployer-api delete job migrate --ignore-not-found
-sed "s/:latest/:$TAG/" k8s/migrate/job.yaml | kubectl apply -f -
-kubectl -n deployer-api wait --for=condition=complete job/migrate --timeout=300s
-kubectl apply -k k8s          # Rollout blue/green de app; Recreate de horizon y scheduler; rolling de reverb
-git add k8s/kustomization.yaml && git commit -m "deploy $TAG"
+# 1. subir la versión y commitear
+echo 1.4.2 > version.txt && git add -A && git commit -m "v1.4.2"
+# 2. construir :1.4.2 y :1.4.2-<sha>, fijar el tag, migrar, aplicar y commitear k8s/kustomization.yaml
+sh k8s/deploy.sh                 # BUILD_ONLY=1 solo construye; FORCE=1 republica una versión existente
 ```
+
+Equivale a: `gcloud builds submit --substitutions=_TAG=<version>,_SHA=<sha>`, `kustomize edit set image ...=:<version>`,
+borrar y reaplicar el Job `migrate` con ese tag, `kubectl apply -k k8s` (Rollout blue/green de app; Recreate de
+horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
 
 ## Cómo encaja con el clúster
 
