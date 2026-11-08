@@ -1,0 +1,7 @@
+# 5º: Horizon (tras redis y migrate).
+#   kubectl apply -k k8s/horizon
+#   kubectl -n deployer-api exec deploy/horizon -- php artisan horizon:status   # Horizon is running.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml

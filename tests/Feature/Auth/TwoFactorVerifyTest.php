@@ -1,9 +1,11 @@
 <?php
 
+use App\Events\Auth\SessionStarted;
 use App\Models\TrustedDevice;
 use App\Models\TwoFactorChallenge;
 use App\Models\User;
 use Database\Factories\TwoFactorChallengeFactory;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 
 beforeEach(function (): void {
@@ -12,6 +14,7 @@ beforeEach(function (): void {
 });
 
 test('the right code consumes the challenge and opens the session', function (): void {
+    Event::fake([SessionStarted::class]);
     $user = User::factory()->create(['email' => 'dev@acme.com']);
     $challenge = TwoFactorChallenge::factory()->for($user)->create();
 
@@ -31,6 +34,8 @@ test('the right code consumes the challenge and opens the session', function ():
         ->getJson(route('auth.me'))
         ->assertOk()
         ->assertJsonPath('email', 'dev@acme.com');
+
+    Event::assertDispatched(SessionStarted::class, fn (SessionStarted $event): bool => $event->user->is($user));
 });
 
 test('remembering the device returns a token that is stored hashed', function (): void {

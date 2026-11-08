@@ -1,0 +1,6 @@
+# 6º: scheduler.
+#   kubectl apply -k k8s/scheduler
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml

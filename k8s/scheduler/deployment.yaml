@@ -1,0 +1,60 @@
+# Planificador (`schedule:work`): corre las tareas de routes/console.php (horizon:snapshot cada
+# 5 min, passport:purge y model:prune diarios). EXACTAMENTE una réplica y strategy Recreate:
+# con dos schedulers vivos durante un rollout las tareas se ejecutarían dos veces.
+# Sin probes HTTP (no escucha); liveness por proceso.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: scheduler
+    app.kubernetes.io/part-of: deployer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scheduler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scheduler
+        app.kubernetes.io/part-of: deployer
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scheduler
+          image: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api:latest
+          args: ["scheduler"]
+          envFrom:
+            - configMapRef:
+                name: deployer-api-env
+            - secretRef:
+                name: deployer-api-secrets
+          env:
+            - name: PHP_MEMORY_LIMIT
+              value: 256M
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "schedule:work"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

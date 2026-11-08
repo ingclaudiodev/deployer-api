@@ -1,0 +1,14 @@
+# Namespace de la API de Deployer en deployer-cluster (GKE Autopilot). Aquí viven app (Octane),
+# horizon, scheduler, reverb y redis. Se aplica UNA vez desde k8s/base (ya no desde k8s/reverb).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deployer-api
+  labels:
+    app.kubernetes.io/part-of: deployer
+    # Todos los pods de este namespace van a la ComputeClass n4-hyperdisk del cluster
+    # (cluster-deployer, paso 6c), igual que HAProxy, KEDA, Argo y Alertmanager: Google no sube la
+    # cuota SSD del proyecto (NOT_ENOUGH_USAGE_HISTORY) y el nodo Autopilot por defecto ya la
+    # consume; los n4 usan Hyperdisk (cuota HDB-TOTAL-GB, 30 GB por nodo). Se factura por nodo.
+    # Redis no vive aquí: es el compartido del cluster (cluster-deployer/redis, ns redis).
+    cloud.google.com/default-compute-class: n4-hyperdisk

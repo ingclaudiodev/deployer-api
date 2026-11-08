@@ -7,8 +7,10 @@ use App\Notifications\Auth\ResetPasswordNotification;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -33,7 +35,7 @@ use Laravel\Passport\HasApiTokens;
 class User extends Authenticatable implements OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, Prunable;
 
     /**
      * Get the attributes that should be cast.
@@ -66,6 +68,30 @@ class User extends Authenticatable implements OAuthenticatable
     public function trustedDevices(): HasMany
     {
         return $this->hasMany(TrustedDevice::class);
+    }
+
+    /**
+     * Sign-ups abandoned before their first confirmed code. They hold the email
+     * hostage, so `model:prune` drops them after `two_factor.unverified_user_days`.
+     *
+     * Only meaningful while the second factor is on: with it off nobody is ever
+     * marked verified, so the rule stays inert. Accounts that did open a session
+     * are kept as well, in case the factor was switched on over an existing base.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        $days = (int) config('auth.two_factor.unverified_user_days');
+
+        if ($days <= 0 || ! config('auth.two_factor.enabled')) {
+            return static::query()->whereKey([]);
+        }
+
+        return static::query()
+            ->whereNull('email_verified_at')
+            ->where('created_at', '<', now()->subDays($days))
+            ->whereDoesntHave('tokens');
     }
 
     /**

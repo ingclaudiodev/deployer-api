@@ -1,0 +1,18 @@
+# Todo deployer-api de una vez (salvo el Job de migraciones, que es inmutable y va aparte):
+#   kubectl apply -k k8s
+# El TAG de la imagen se fija AQUÍ para todos los servicios (app, horizon, scheduler, reverb):
+#   cd k8s && kustomize edit set image us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api=:<tag>
+#   (o editar newTag a mano). Nunca desplegar :latest en producción: no se sabe qué corre.
+# Orden de las carpetas = orden de aplicación cuando se hace a mano (ver README.md).
+# Redis NO está aquí: es el Redis compartido del cluster (cluster-deployer/redis, paso 5b).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- base
+- app
+- horizon
+- scheduler
+- reverb
+images:
+- name: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api
+  newTag: 7d489f4

@@ -1,0 +1,61 @@
+# Tres Services sobre los mismos pods de la API, cada uno con un papel:
+#
+# 1) app-headless (clusterIP None) = activeService del Rollout. El DNS devuelve un registro A por
+#    pod READY de la revisión activa (publishNotReadyAddresses false). HAProxy lo usa con
+#    server-template + balance leastconn (cluster-deployer/haproxy/haproxy-cm.yaml, backend
+#    backend-deployer): reparte por carga real, pod a pod, en vez del sorteo por conexión de la
+#    ClusterIP.
+# 2) app (ClusterIP) = respaldo de HAProxy (`backup`) y entrada para llamadas internas; incluye
+#    TODOS los pods Ready con el selector base (Argo no le toca el selector).
+# 3) app-preview = previewService del Rollout: la revisión nueva antes de promover.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-headless
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-preview
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

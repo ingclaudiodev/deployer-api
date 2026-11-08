@@ -1,0 +1,34 @@
+# Construye la imagen de deployer-api (docker/Dockerfile, target `app`) en Cloud Build y la sube
+# a Artifact Registry. Se usa Cloud Build y no `docker build` local porque los nodos del cluster
+# son amd64 y la imagen local del Mac (deployer-api:dev) es arm64.
+#
+# Una vez (crear el repositorio y habilitar la API):
+#   gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com
+#   gcloud artifacts repositories create deployer --repository-format=docker --location=us-central1 \
+#     --description="Imágenes de deployer-api"
+# Cada despliegue (desde la raíz del repo, con el árbol commiteado):
+#   TAG=$(git rev-parse --short HEAD)
+#   gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$TAG .
+#   cd k8s && kustomize edit set image us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api=:$TAG
+# El contexto respeta .dockerignore (node_modules, vendor y .env no se suben).
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --target=app
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:latest
+      - -f
+      - docker/Dockerfile
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG
+  - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:latest
+substitutions:
+  _TAG: manual
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1800s

@@ -1,0 +1,16 @@
+# maxUnavailable ABSOLUTO (no %): con el piso de 2 réplicas de KEDA un porcentaje daría 0
+# disrupciones y bloquearía los drains de Autopilot. 1 pacea las evicciones voluntarias
+# (upgrades de nodo, consolidación) de a una y siempre queda un pod sirviendo.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app

@@ -1,0 +1,10 @@
+# 4º: la API (tras base, redis y el Job de migraciones).
+#   kubectl apply -k k8s/app
+#   kubectl argo rollouts get rollout app -n deployer-api --watch
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rollout.yaml
+  - services.yaml
+  - pdb.yaml
+  - scaledobject.yaml

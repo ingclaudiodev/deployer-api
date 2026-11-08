@@ -12,6 +12,7 @@ use App\Models\User;
 use Carbon\CarbonInterval;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Hashing\Hasher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -34,11 +35,11 @@ class AuthServiceProvider extends ServiceProvider
             return new AuthenticationManager($app, $drivers);
         });
 
-        $this->app->singleton(TokenIssuer::class, function (): TokenIssuer {
+        $this->app->singleton(TokenIssuer::class, function ($app): TokenIssuer {
             /** @var string $name */
             $name = config('auth.tokens.name');
 
-            return new TokenIssuer($name);
+            return new TokenIssuer($name, $app->make(Dispatcher::class));
         });
 
         $this->app->singleton(ChallengeService::class, function ($app): ChallengeService {
