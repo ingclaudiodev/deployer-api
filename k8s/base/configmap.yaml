@@ -18,6 +18,11 @@ data:
   APP_DEBUG: "false"
   APP_URL: https://backend.deployer.cl
   FRONTEND_URL: https://deployer.cl
+  # Proxies cuyos X-Forwarded-* se creen (HTTPS en las URLs, IP real del cliente para el
+  # throttle): rango de pods del clúster (HAProxy), rangos de los GFE que llegan al backend y la
+  # IP del Gateway `deployer-gateway-ip` que GCLB agrega a X-Forwarded-For. Nunca "*": dejaría al
+  # cliente forjar su IP. Si cambia la IP del Gateway o el clúster, actualizar aquí.
+  TRUSTED_PROXIES: 10.4.0.0/17,130.211.0.0/22,35.191.0.0/16,136.82.30.226
   APP_LOCALE: es
   APP_FALLBACK_LOCALE: en
   APP_MAINTENANCE_DRIVER: file

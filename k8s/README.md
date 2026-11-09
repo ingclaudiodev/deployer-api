@@ -134,9 +134,11 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
 
 ## Pendientes conocidos (código de la app, no de k8s)
 
-- `bootstrap/app.php` no configura `trustProxies`: detrás de HAProxy la app ve la IP del pod de
-  HAProxy (el throttle de login agrupa a todos) y genera URLs `http`. Agregar
-  `->trustProxies(at: '*')` o la red del clúster.
+- `TRUSTED_PROXIES` (ConfigMap) fija qué proxies se creen para `X-Forwarded-For/Proto/Port`:
+  rango de pods `10.4.0.0/17` (HAProxy), GFE `130.211.0.0/22` y `35.191.0.0/16`, e IP del Gateway
+  `136.82.30.226`. Sin esto la app generaba URLs `http` (Mixed Content) y el throttle de login
+  agrupaba a todos por la IP de HAProxy. No usar `*`: Laravel confiaría en toda la cadena y el
+  cliente podría forjar su IP. `X-Forwarded-Host` no se confía (GCLB no lo fija ni lo limpia).
 - No hay `config/cors.php`: HAProxy contesta el preflight y añade los headers CORS de respuesta,
   pero si en algún momento la API se expone sin HAProxy, publicar la config de CORS.
 - `FILESYSTEM_DISK=local` no persiste: si la app guarda archivos, pasar a GCS.
