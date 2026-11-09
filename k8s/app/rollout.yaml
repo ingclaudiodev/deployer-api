@@ -1,12 +1,15 @@
 # API HTTP (Laravel Octane sobre Swoole) como Argo Rollout BLUE/GREEN, patrón de GPS Global:
-#   - activeService  = app-headless: el Service que resuelve HAProxy pod a pod (server-template).
-#     Argo cambia su selector en el instante del switch; los clientes no ven pods de la revisión vieja.
+#   - activeService  = app-headless: el Service cuyos pods Ready usa el interceptor del KEDA HTTP
+#     Add-on (httpscaledobject.yaml). Argo cambia su selector en el instante del switch; los
+#     clientes no ven pods de la revisión vieja.
 #   - previewService = app-preview: la revisión nueva antes de promover (probar por port-forward).
 #   - autoPromotionEnabled true: promueve sola cuando la revisión nueva está Ready. Para validar a
 #     mano antes de promover: poner false y usar `kubectl argo rollouts promote app`.
 #   - scaleDownDelaySeconds 60: la revisión vieja sigue viva 60 s tras el switch (peticiones en
-#     vuelo y DNS del headless cacheado en HAProxy, hold valid 10s).
-# Réplicas: las fija KEDA (k8s/app/scaledobject.yaml, 2-10); no declarar `replicas` aquí.
+#     vuelo; el interceptor refresca sus endpoints por informer, sin caché DNS).
+# Réplicas: las fija el KEDA HTTP Add-on (k8s/app/httpscaledobject.yaml, 0-2: scale-to-zero por
+# tráfico); no declarar `replicas` aquí. Con 0 réplicas el Rollout queda Healthy y vacío; la
+# primera petición a backend.deployer.cl lo despierta.
 #
 # Memoria: OCTANE_WORKERS x PHP_MEMORY_LIMIT + task workers. 2 workers x 256M + 1 task x 256M
 # cabe en 1Gi. `auto` usaría la CPU del NODO (2 en n4-standard-2, 8 en el ek-standard-8): no usar.

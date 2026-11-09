@@ -1,6 +1,7 @@
-# maxUnavailable ABSOLUTO (no %): con el piso de 2 réplicas de KEDA un porcentaje daría 0
-# disrupciones y bloquearía los drains de Autopilot. 1 pacea las evicciones voluntarias
-# (upgrades de nodo, consolidación) de a una y siempre queda un pod sirviendo.
+# maxUnavailable ABSOLUTO (no %): con 1 o 2 réplicas (KEDA HTTP Add-on, 0-2) un porcentaje daría
+# 0 disrupciones y bloquearía los drains de Autopilot. 1 pacea las evicciones voluntarias
+# (upgrades de nodo, consolidación) de a una; con 2 pods siempre queda uno sirviendo y con 1
+# el interceptor del add-on retiene las peticiones hasta que el reemplazo esté Ready.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

@@ -1,0 +1,57 @@
+# Escalado de la API por TRÁFICO HTTP con el KEDA HTTP Add-on (cluster-deployer, keda/values-http-add-on.yaml):
+# 0-2 réplicas. Sin peticiones durante `scaledownPeriod` la API queda en 0 pods; la primera
+# petición a backend.deployer.cl la enciende. OJO con el ahorro: la ComputeClass n4 se factura
+# POR NODO; 0 pods ahorran de verdad solo si Autopilot llega a quitar un nodo (hoy app comparte
+# nodo con reverb). La métrica de éxito es `kubectl get nodes` de madrugada, no el DESIRED.
+#
+# Cómo funciona: HAProxy ya no habla con los pods, sino con el interceptor del add-on
+# (keda-add-ons-http-interceptor-proxy.keda.svc:8080). El interceptor enruta por el header Host
+# (`hosts`), cuenta las peticiones en vuelo (la métrica que escala) y, si el Rollout está en 0,
+# RETIENE la petición hasta que haya un pod Ready (`timeouts.conditionWait`) y recién entonces la
+# reenvía al pod. El operator del add-on crea y administra un ScaledObject con el MISMO nombre
+# (`app`, trigger external-push): por eso ya no existe k8s/app/scaledobject.yaml y, al migrar,
+# hay que borrar el ScaledObject antiguo a mano (README, "Escalar").
+#
+# `service: app-headless`: el interceptor reenvía directo a los pods Ready de ese Service
+# (directPodRouting), y app-headless es el activeService del Rollout blue/green: solo pods de la
+# revisión promovida, igual que hacía HAProxy con server-template. El Service `app` (ClusterIP)
+# incluiría los pods de la revisión preview.
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: app
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  hosts:
+    - backend.deployer.cl
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: app
+    service: app-headless
+    port: 8000
+  replicas:
+    min: 0
+    max: 2
+  # Segundos SIN tráfico antes de bajar a 0. Muy corto = arranques en frío a cada rato durante el
+  # día (10-30 s por petición si el nodo sigue vivo; minutos si Autopilot tuvo que crear nodo).
+  scaledownPeriod: 900
+  # Al CREAR el ScaledObject KEDA escala al mínimo de inmediato si no ve tráfico (scaledownPeriod
+  # solo cuenta tras la primera activación). Sin esto, (re)crear el HTTPScaledObject mientras
+  # HAProxy aún no pasa por el interceptor apaga la API en el acto. 900 s de gracia inicial.
+  initialCooldownPeriod: 900
+  scalingMetric:
+    # Peticiones en vuelo POR pod. Cada pod tiene 2 workers de Octane (rollout.yaml): con 5 o más
+    # concurrentes nace el segundo pod. El default del add-on es 100: con eso nunca pasaría de 1.
+    concurrency:
+      targetValue: 4
+  timeouts:
+    # Cuánto retiene el interceptor una petición esperando un pod Ready al despertar: cubre la
+    # startupProbe (hasta 120 s) más la creación de un nodo n4 por Autopilot. El GCLB y HAProxy
+    # esperan 86400 s, así que el tope real es este.
+    conditionWait: 300s
+    # Tiempo máximo hasta recibir cabeceras de respuesta del pod (default del add-on: 300 s).
+    responseHeader: 300s

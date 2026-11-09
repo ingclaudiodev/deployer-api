@@ -7,4 +7,4 @@ resources:
   - rollout.yaml
   - services.yaml
   - pdb.yaml
-  - scaledobject.yaml
+  - httpscaledobject.yaml
