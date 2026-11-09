@@ -24,6 +24,18 @@ class BroadcastWelcome implements ShouldQueue
     }
 
     /**
+     * Horizon tags (business rule: every queued job carries them). Horizon adds the
+     * `App\Models\User:{id}` tag itself from the event, so only the category goes here.
+     * Horizon builds the listener without its constructor to read these: keep them static.
+     *
+     * @return list<string>
+     */
+    public function tags(SessionStarted $event): array
+    {
+        return ['broadcast', 'broadcast:welcome'];
+    }
+
+    /**
      * Seconds the queued job waits before running (see `auth.welcome.delay_seconds`).
      */
     public function withDelay(SessionStarted $event): int

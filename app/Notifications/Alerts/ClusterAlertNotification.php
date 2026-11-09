@@ -38,6 +38,18 @@ class ClusterAlertNotification extends Notification implements ShouldQueue
     }
 
     /**
+     * Horizon tags (business rule: every queued job carries them). The notifiable is anonymous
+     * (a webhook URL), so without these the job would show up untagged. `alert:<severity>` lets
+     * the dashboard monitor critical alerts on their own.
+     *
+     * @return list<string>
+     */
+    public function tags(): array
+    {
+        return ['slack', 'slack:cluster-alert', 'alert:'.$this->severity->value];
+    }
+
+    /**
      * The incoming-webhook payload: a headline plus one coloured attachment with the detail.
      *
      * @return array{text: string, attachments: list<array{color: string, text: string, fields: list<array{title: string, value: string, short: bool}>, footer: string, ts: int}>}
