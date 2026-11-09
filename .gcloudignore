@@ -1,0 +1,11 @@
+# Qué NO sube `gcloud builds submit` a Cloud Build (cloudbuild.yaml). Con este archivo presente gcloud
+# deja de inferir uno a partir de .gitignore. Dentro del worker, docker build aplica además .dockerignore.
+.gcloudignore
+#!include:.gitignore
+.git
+.github
+tests
+docs
+graphify-out
+storage/logs
+public/build

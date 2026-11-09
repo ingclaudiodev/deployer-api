@@ -15,7 +15,11 @@
 # qué commit exacto produjo esa versión). No se publica `:latest`: en producción nunca se sabe
 # qué hay detrás. Subir la versión = editar version.txt y commitear ANTES de construir;
 # k8s/deploy.sh se niega a reconstruir una versión que ya existe en Artifact Registry.
-# El contexto respeta .dockerignore (node_modules, vendor y .env no se suben).
+# QUÉ SE SUBE: `gcloud builds submit` arma el tarball con .gcloudignore (raíz del repo; antes de
+# existir usaba uno implícito a partir de .gitignore, de ahí el aviso "Some files were not
+# included in the source upload": es normal, son node_modules, vendor, .env, etc.). Ya dentro del
+# worker, `docker build` aplica además .dockerignore. Las migraciones NO van aquí: Cloud Build no
+# llega a la red privada de Cloud SQL; las corre el Job k8s/migrate con la imagen recién subida.
 #
 # BuildKit es OBLIGATORIO: docker/Dockerfile usa `ADD --chmod`, `COPY --chmod` y
 # `RUN --mount=type=cache` (y la directiva `# syntax=docker/dockerfile:1`). El builder
