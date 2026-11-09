@@ -1,0 +1,104 @@
+# Variables NO secretas compartidas por app (Octane), horizon, scheduler y el Job de migraciones.
+# Reverb tiene su propio ConfigMap (k8s/reverb/configmap.yaml) porque anuncia otro host.
+# Lo secreto (APP_KEY, DB_PASSWORD, claves de Passport, REVERB_APP_*, webhooks, correo) va en el
+# Secret deployer-api-secrets (ver secret.example.yaml). Cambiar un valor aquí requiere rotar los
+# pods (Octane y Horizon leen el entorno al arrancar): kubectl -n deployer-api rollout restart ...
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployer-api-env
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/part-of: deployer
+data:
+  APP_NAME: deployer.cl
+  # production: el entrypoint corre `optimize`, exige las claves de Passport y Horizon usa su
+  # bloque 'production' (10 procesos). No cambiar sin revisar docker/entrypoint.sh.
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: https://backend.deployer.cl
+  FRONTEND_URL: https://deployer.cl
+  # Proxies cuyos X-Forwarded-* se creen (HTTPS en las URLs, IP real del cliente para el
+  # throttle): rango de pods del clúster (HAProxy), rangos de los GFE que llegan al backend y la
+  # IP del Gateway `deployer-gateway-ip` que GCLB agrega a X-Forwarded-For. Nunca "*": dejaría al
+  # cliente forjar su IP. Si cambia la IP del Gateway o el clúster, actualizar aquí.
+  TRUSTED_PROXIES: 10.4.0.0/17,130.211.0.0/22,35.191.0.0/16,136.82.30.226
+  APP_LOCALE: es
+  APP_FALLBACK_LOCALE: en
+  APP_MAINTENANCE_DRIVER: file
+  BCRYPT_ROUNDS: "12"
+
+  # Logs a stderr: los recoge Cloud Logging del nodo. Para sumar Slack: LOG_CHANNEL=stack,
+  # LOG_STACK=stderr,slack y LOG_SLACK_WEBHOOK_URL en el Secret (con webhook vacío el canal
+  # slack falla al escribir, por eso no va por defecto).
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: info
+  LOG_SLACK_USERNAME: Deployer
+  LOG_SLACK_EMOJI: ":rotating_light:"
+  LOG_SLACK_LEVEL: error
+
+  # Cloud SQL deployerbd (Postgres 18) por Private Service Connect: endpoint deployerbd-psc en la
+  # red `default` del cluster (gcloud compute forwarding-rules list). Sin IP pública ni proxy.
+  # La instancia es sslMode ENCRYPTED_ONLY: sslmode=require o rechaza la conexión.
+  DB_CONNECTION: pgsql
+  DB_HOST: 10.128.0.50
+  DB_PORT: "5432"
+  DB_DATABASE: deployerbd
+  # Usuario propio de la app (no `postgres`): gcloud sql users create deployer --instance=deployerbd ...
+  DB_USERNAME: deployer
+  DB_SSLMODE: require
+
+  # Redis COMPARTIDO del cluster (cluster-deployer/redis, paso 5b; 1 GiB, volatile-lru): cache,
+  # sesiones, colas de Horizon y pub/sub de Reverb. Sin clave: solo alcanzable dentro del cluster.
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis.redis.svc.cluster.local
+  REDIS_PORT: "6379"
+  SESSION_DRIVER: redis
+  SESSION_LIFETIME: "120"
+  CACHE_STORE: redis
+  QUEUE_CONNECTION: redis
+
+  # Reverb: app y horizon PUBLICAN al Service interno (sin TLS); el navegador entra por
+  # wss://ws.deployer.cl (HTTPRoute en cluster-deployer/gateway/routes/reverb.yaml).
+  # REVERB_APP_* vienen del Secret.
+  BROADCAST_CONNECTION: reverb
+  REVERB_HOST: reverb.deployer-api.svc.cluster.local
+  REVERB_PORT: "6001"
+  REVERB_SCHEME: http
+  AUTH_WELCOME_DELAY_SECONDS: "3"
+
+  # Sin disco persistente en los pods: `local` guarda en el contenedor y se pierde al rotar.
+  # Si la app sube archivos, pasar a GCS (disco `gcs` con un bucket) antes de usarlo.
+  FILESYSTEM_DISK: local
+
+  # Correo: Zoho ZeptoMail por SMTP (Mail Agent "default"). Usuario `emailapikey` y el Send Mail
+  # Token van en el Secret (MAIL_USERNAME / MAIL_PASSWORD). 465 = TLS implícito (smtps), sin
+  # STARTTLS que degradar; ZeptoMail exige TLS >= 1.2 y no acepta el puerto 25. Sale a Internet por
+  # el Cloud NAT del clúster (deployer-nat). Quien envía es Horizon: todo correo va por cola.
+  # El remitente DEBE ser del dominio verificado en ZeptoMail (backend.deployer.cl); con otro
+  # dominio el servidor rechaza el mensaje. Para usar @deployer.cl, verificar ese dominio antes.
+  MAIL_MAILER: smtp
+  MAIL_SCHEME: smtps
+  MAIL_HOST: smtp.zeptomail.com
+  MAIL_PORT: "465"
+  MAIL_FROM_ADDRESS: no-responder@backend.deployer.cl
+  MAIL_FROM_NAME: deployer.cl
+
+  # Autenticación (mismos valores que .env.example).
+  AUTH_TOKEN_NAME: deployer-client
+  AUTH_TOKEN_EXPIRE_DAYS: "30"
+  AUTH_THROTTLE_PER_MINUTE: "10"
+  AUTH_RESET_PASSWORD_PATH: /restablecer
+  AUTH_TWO_FACTOR_ENABLED: "true"
+  AUTH_TWO_FACTOR_CODE_LENGTH: "6"
+  AUTH_TWO_FACTOR_EXPIRE_MINUTES: "10"
+  AUTH_TWO_FACTOR_MAX_ATTEMPTS: "5"
+  AUTH_TWO_FACTOR_RESEND_SECONDS: "60"
+  AUTH_TWO_FACTOR_VERIFY_PER_MINUTE: "10"
+  AUTH_TWO_FACTOR_TRUST_DAYS: "30"
+  AUTH_TWO_FACTOR_UNVERIFIED_USER_DAYS: "7"
+
+  # Octane (docker/entrypoint.sh). Código inmutable en la imagen: sin revalidar opcache.
+  OCTANE_SERVER: swoole
+  PHP_OPCACHE_VALIDATE_TIMESTAMPS: "0"
+  RUN_MIGRATIONS: "false"

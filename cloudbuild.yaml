@@ -1,0 +1,56 @@
+# Construye la imagen de deployer-api (docker/Dockerfile, target `app`) en Cloud Build y la sube
+# a Artifact Registry. Se usa Cloud Build y no `docker build` local porque los nodos del cluster
+# son amd64 y la imagen local del Mac (deployer-api:dev) es arm64.
+#
+# Una vez (crear el repositorio y habilitar la API):
+#   gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com
+#   gcloud artifacts repositories create deployer --repository-format=docker --location=us-central1 \
+#     --description="Imágenes de deployer-api"
+# Cada despliegue: `sh k8s/deploy.sh` (lee version.txt, construye, fija el tag y aplica). A mano:
+#   VERSION=$(tr -d '[:space:]' < version.txt); SHA=$(git rev-parse --short HEAD)
+#   gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$VERSION,_SHA=$SHA .
+#   cd k8s && kustomize edit set image us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api=:$VERSION
+# VERSIONADO: el tag de la imagen ES la versión de version.txt (semver, p. ej. 1.4.2). Cada build
+# sube dos tags: `:<version>` (el que despliega kustomize) y `:<version>-<sha>` (trazabilidad:
+# qué commit exacto produjo esa versión). No se publica `:latest`: en producción nunca se sabe
+# qué hay detrás. Subir la versión = editar version.txt y commitear ANTES de construir;
+# k8s/deploy.sh se niega a reconstruir una versión que ya existe en Artifact Registry.
+# QUÉ SE SUBE: `gcloud builds submit` arma el tarball con .gcloudignore (raíz del repo; antes de
+# existir usaba uno implícito a partir de .gitignore, de ahí el aviso "Some files were not
+# included in the source upload": es normal, son node_modules, vendor, .env, etc.). Ya dentro del
+# worker, `docker build` aplica además .dockerignore. Las migraciones NO van aquí: Cloud Build no
+# llega a la red privada de Cloud SQL; las corre el Job k8s/migrate con la imagen recién subida.
+#
+# BuildKit es OBLIGATORIO: docker/Dockerfile usa `ADD --chmod`, `COPY --chmod` y
+# `RUN --mount=type=cache` (y la directiva `# syntax=docker/dockerfile:1`). El builder
+# gcr.io/cloud-builders/docker corre el `docker build` clásico y sin la variable falla con
+# "the --chmod option requires BuildKit" (build 29348dc7, 2026-11-08). El frontend
+# docker/dockerfile:1 se baja de Docker Hub, al que el worker de Cloud Build sí llega.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --target=app
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG-$_SHA
+      - --label=org.opencontainers.image.version=$_TAG
+      - --label=org.opencontainers.image.revision=$_SHA
+      - -f
+      - docker/Dockerfile
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG
+  - us-central1-docker.pkg.dev/$PROJECT_ID/deployer/deployer-api:$_TAG-$_SHA
+substitutions:
+  _TAG: manual     # versión de version.txt
+  _SHA: manual     # git rev-parse --short HEAD
+options:
+  machineType: E2_HIGHCPU_8
+  # Con CLOUD_LOGGING_ONLY `gcloud builds submit` NO muestra el log del build en la terminal:
+  # si falla, verlo con `gcloud builds log <ID>` (el script de cluster-deployer lo hace solo).
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1800s

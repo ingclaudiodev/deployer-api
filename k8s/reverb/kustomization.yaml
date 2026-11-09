@@ -1,0 +1,13 @@
+# 7º: Reverb (WebSockets). El namespace y el Secret vienen de k8s/base.
+#   kubectl apply -k k8s/reverb
+#   kubectl -n deployer-api port-forward svc/reverb 6001:6001   # curl localhost:6001/up
+# La HTTPRoute pública (wss://ws.deployer.cl) NO está aquí: como todas las rutas del Gateway,
+# vive en el repo del clúster (cluster-deployer/gateway/routes/reverb.yaml, ns haproxy).
+# Aquí queda lo que debe estar junto al Service: ReferenceGrant + políticas (policies.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - policies.yaml

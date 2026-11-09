@@ -116,6 +116,24 @@ return [
         'resend_seconds' => (int) env('AUTH_TWO_FACTOR_RESEND_SECONDS', 60),
         'verify_per_minute' => (int) env('AUTH_TWO_FACTOR_VERIFY_PER_MINUTE', 10),
         'trust_days' => (int) env('AUTH_TWO_FACTOR_TRUST_DAYS', 30),
+        // Accounts that never confirmed their first code are dropped after this many days (0 keeps them).
+        'unverified_user_days' => (int) env('AUTH_TWO_FACTOR_UNVERIFIED_USER_DAYS', 7),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Welcome Broadcast
+    |--------------------------------------------------------------------------
+    |
+    | After every sign-in a welcome card is pushed to the user's private channel
+    | over Reverb. The browser only connects once it holds the new token, so the
+    | push waits "delay_seconds" on the queue; otherwise it would leave before
+    | anyone is subscribed and the toast would never show.
+    |
+    */
+
+    'welcome' => [
+        'delay_seconds' => (int) env('AUTH_WELCOME_DELAY_SECONDS', 3),
     ],
 
     /*

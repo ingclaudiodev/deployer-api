@@ -1,0 +1,54 @@
+# Migraciones: un Job por despliegue, ANTES de rotar app/horizon a la imagen nueva.
+# Los Jobs son inmutables: borrar el anterior y volver a aplicar (no está en el kustomization
+# raíz por eso). Misma imagen y mismo entorno que la app; el entrypoint corre `optimize` y
+# luego el comando. backoffLimit 0: si falla, se mira el log y se corrige, no se reintenta a ciegas.
+#
+#   kubectl -n deployer-api delete job migrate --ignore-not-found
+#   kubectl apply -f k8s/migrate/job.yaml        # (o kustomize edit set image en k8s/ y apply -k)
+#   kubectl -n deployer-api wait --for=condition=complete job/migrate --timeout=300s
+#   kubectl -n deployer-api logs job/migrate
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: migrate
+    app.kubernetes.io/part-of: deployer
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrate
+        app.kubernetes.io/part-of: deployer
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api:latest
+          args: ["php", "artisan", "migrate", "--force", "--no-interaction"]
+          envFrom:
+            - configMapRef:
+                name: deployer-api-env
+            - secretRef:
+                name: deployer-api-secrets
+          # Sin requests Autopilot asigna 500m/2Gi y los cobra; migrar necesita poco.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

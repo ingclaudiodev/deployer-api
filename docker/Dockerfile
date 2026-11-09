@@ -65,7 +65,8 @@ RUN mkdir -p storage/app/public storage/framework/cache/data storage/framework/s
 
 USER app
 
-EXPOSE 8000
+# 8000: Octane (HTTP). 6001: Reverb (WebSockets) cuando el contenedor arranca con `reverb`.
+EXPOSE 8000 6001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -qO- "http://127.0.0.1:${PORT:-8000}/up" > /dev/null || exit 1

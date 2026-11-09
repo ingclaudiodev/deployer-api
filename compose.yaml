@@ -1,12 +1,14 @@
-# Entorno local de deployer-api: Octane (Swoole) + Horizon + scheduler + Redis.
+# Entorno local de deployer-api: Octane (Swoole) + Horizon + scheduler + Reverb + Redis.
 #
 #   docker compose up -d --build
 #   docker compose exec app php artisan octane:reload   # tras cambiar código PHP
 #
-# La base de datos NO corre en compose: la app se conecta con los DB_* del .env.
-# Para llegar al Postgres de la máquina anfitriona usa DB_HOST=host.docker.internal
+# La base de datos NO corre en compose: la app se conecta con los DB_* del .env, salvo DB_HOST,
+# que aquí se fija en host.docker.internal para llegar al Postgres de la máquina anfitriona
 # (dentro de un contenedor 127.0.0.1 es el propio contenedor).
-# REDIS_HOST se sobreescribe para apuntar al servicio redis de compose.
+# REDIS_HOST y REVERB_HOST se sobreescriben para apuntar a los servicios redis y reverb de
+# compose (así app y horizon publican los eventos dentro de la red de Docker); el navegador
+# sigue entrando por localhost:${REVERB_PORT}, que es el puerto publicado del servicio reverb.
 
 name: deployer
 
@@ -18,7 +20,10 @@ x-app: &app
   image: deployer-api:dev
   env_file: .env
   environment:
+    DB_HOST: host.docker.internal
     REDIS_HOST: redis
+    REVERB_HOST: reverb
+    REVERB_SCHEME: http
     PHP_OPCACHE_VALIDATE_TIMESTAMPS: 1
   volumes:
     - .:/var/www/html
@@ -52,6 +57,18 @@ services:
     command: scheduler
     healthcheck:
       disable: true
+
+  reverb:
+    <<: *app
+    command: reverb
+    ports:
+      - "${REVERB_PORT:-6001}:${REVERB_SERVER_PORT:-6001}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${REVERB_SERVER_PORT:-6001}/up"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
   redis:
     image: redis:7-alpine

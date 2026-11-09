@@ -1,0 +1,111 @@
+# API HTTP (Laravel Octane sobre Swoole) como Argo Rollout BLUE/GREEN, patrón de GPS Global:
+#   - activeService  = app-headless: el Service que resuelve HAProxy pod a pod (server-template).
+#     Argo cambia su selector en el instante del switch; los clientes no ven pods de la revisión vieja.
+#   - previewService = app-preview: la revisión nueva antes de promover (probar por port-forward).
+#   - autoPromotionEnabled true: promueve sola cuando la revisión nueva está Ready. Para validar a
+#     mano antes de promover: poner false y usar `kubectl argo rollouts promote app`.
+#   - scaleDownDelaySeconds 60: la revisión vieja sigue viva 60 s tras el switch (peticiones en
+#     vuelo y DNS del headless cacheado en HAProxy, hold valid 10s).
+# Réplicas: las fija KEDA (k8s/app/scaledobject.yaml, 2-10); no declarar `replicas` aquí.
+#
+# Memoria: OCTANE_WORKERS x PHP_MEMORY_LIMIT + task workers. 2 workers x 256M + 1 task x 256M
+# cabe en 1Gi. `auto` usaría la CPU del NODO (2 en n4-standard-2, 8 en el ek-standard-8): no usar.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: app
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app
+  strategy:
+    blueGreen:
+      activeService: app-headless
+      previewService: app-preview
+      autoPromotionEnabled: true
+      scaleDownDelaySeconds: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app
+        app.kubernetes.io/part-of: deployer
+    spec:
+      # preStop 10 s: el pod sale del DNS del headless (readiness) antes de recibir SIGTERM;
+      # Octane termina las peticiones en curso. 60 s de gracia cubre peticiones normales.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: app
+      containers:
+        - name: app
+          image: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api:latest
+          args: ["octane"]
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: deployer-api-env
+            - secretRef:
+                name: deployer-api-secrets
+          env:
+            - name: OCTANE_WORKERS
+              value: "2"
+            - name: OCTANE_TASK_WORKERS
+              value: "1"
+            - name: OCTANE_MAX_REQUESTS
+              value: "500"
+            - name: PHP_MEMORY_LIMIT
+              value: 256M
+          # /up es el health de Laravel (bootstrap/app.php). startup: hasta 2 min para que
+          # `optimize` + Swoole arranquen en un nodo frío.
+          startupProbe:
+            httpGet:
+              path: /up
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /up
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

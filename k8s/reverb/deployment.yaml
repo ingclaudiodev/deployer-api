@@ -1,0 +1,87 @@
+# Servidor WebSocket (Laravel Reverb) de deployer-api. Misma imagen que la API; el entrypoint
+# (docker/entrypoint.sh) recibe `reverb` como comando y lanza `reverb:start`.
+#
+# replicas: 1 a propósito. Reverb guarda las conexiones en memoria de cada proceso: con N
+# réplicas un evento publicado llega solo a los sockets de la réplica que lo recibió, salvo que
+# REVERB_SCALING_ENABLED=true (Redis pub/sub). Subir réplicas => activar eso primero.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reverb
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: reverb
+    app.kubernetes.io/part-of: deployer
+spec:
+  replicas: 1
+  # Un solo pod y maxUnavailable 0: el nuevo debe estar listo antes de matar al viejo. Los
+  # clientes se reconectan solos (pusher-js reintenta); lo que se pierde son los eventos de
+  # ese instante, que para la tarjeta de bienvenida es aceptable.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reverb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reverb
+        app.kubernetes.io/part-of: deployer
+    spec:
+      # Tiempo para que Reverb cierre los sockets con gracia y los clientes migren al pod nuevo.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reverb
+          # Imagen de la API (target `app` de docker/Dockerfile). El tag lo fija k8s/kustomization.yaml (images:).
+          image: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api:latest
+          args: ["reverb"]
+          ports:
+            - name: ws
+              containerPort: 6001
+          envFrom:
+            - configMapRef:
+                name: reverb-config
+            - secretRef:
+                name: deployer-api-secrets   # Secret compartido (k8s/base/secret.example.yaml)
+          env:
+            # El entrypoint corre `optimize` en producción; evita que intente migrar o generar claves.
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: PASSPORT_PRIVATE_KEY
+              value: "unused-by-reverb"
+          # Reverb responde /up con {"health":"OK"} en su propio puerto.
+          startupProbe:
+            httpGet:
+              path: /up
+              port: ws
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /up
+              port: ws
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: ws
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

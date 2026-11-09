@@ -1,0 +1,71 @@
+# Workers de colas (Laravel Horizon). Una réplica; Horizon reparte internamente hasta
+# `maxProcesses` (config/horizon.php, bloque production: 10 procesos de 128 MB) => el pod
+# necesita ~1.5Gi o los procesos mueren por memoria bajo carga. Para abaratar, bajar
+# maxProcesses en el código y aquí la memoria.
+#
+# Apagado limpio: preStop `horizon:terminate` avisa al master, que deja terminar los jobs en
+# curso (timeout 60 s en horizon.php) y sale; terminationGracePeriodSeconds 90 > 60 + margen.
+# strategy Recreate: con 1 réplica evita dos Horizon consumiendo a la vez durante un rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: horizon
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: horizon
+    app.kubernetes.io/part-of: deployer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: horizon
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: horizon
+        app.kubernetes.io/part-of: deployer
+    spec:
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: horizon
+          image: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api:latest
+          args: ["horizon"]
+          envFrom:
+            - configMapRef:
+                name: deployer-api-env
+            - secretRef:
+                name: deployer-api-secrets
+          env:
+            - name: PHP_MEMORY_LIMIT
+              value: 256M
+          # horizon:status consulta Redis: si Horizon murió o quedó pausado, el pod se reinicia.
+          livenessProbe:
+            exec:
+              command: ["php", "artisan", "horizon:status"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["php", "artisan", "horizon:terminate"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1536Mi
+            limits:
+              cpu: 500m
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

@@ -7,12 +7,20 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
+use Illuminate\Queue\Attributes\Backoff;
+use Illuminate\Queue\Attributes\Tries;
 
 /**
  * Deployer's own wording for the password reset email. The link itself comes from
  * ResetPassword::createUrlUsing(), configured in AuthServiceProvider, so it opens the SPA.
  * Queued, like every outbound email of this app.
+ *
+ * Retried on a transient SMTP failure (ZeptoMail is an external service): three attempts,
+ * 10 s then 60 s apart, so the email arrives late rather than never. Both delays stay far
+ * below the lifetime of what the email carries.
  */
+#[Tries(3)]
+#[Backoff([10, 60])]
 class ResetPasswordNotification extends ResetPassword implements ShouldQueue
 {
     use Queueable;

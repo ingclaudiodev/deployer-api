@@ -1,0 +1,43 @@
+# KEDA escala el ROLLOUT (no un Deployment): scaleTargetRef con apiVersion/kind de Argo.
+# 2-10 réplicas por CPU y memoria; el umbral es sobre los requests (500m / 1Gi).
+# Cuando GMP tenga las métricas de HAProxy (cluster-deployer, paso 6b) se puede sumar un trigger
+# prometheus por peticiones al backend backend-deployer, igual que haproxy-scaledobject.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: app
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: deployer
+spec:
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: app
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: "80"
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120

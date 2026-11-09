@@ -1,0 +1,8 @@
+# 1º de todo: namespace + configuración compartida.
+#   kubectl apply -k k8s/base
+#   (después, a mano, el Secret deployer-api-secrets: ver secret.example.yaml)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml

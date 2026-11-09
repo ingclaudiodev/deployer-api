@@ -1,0 +1,82 @@
+# Lo que el Gateway necesita en el namespace del Service reverb para servir wss://ws.deployer.cl
+# DIRECTO (Gateway -> Service reverb, sin HAProxy: así una rotación de HAProxy no corta los
+# WebSockets). La HTTPRoute vive con las demás rutas del clúster, en
+# cluster-deployer/gateway/routes/reverb.yaml (namespace haproxy), y apunta a este Service.
+# Modelo: cluster-externo/gateway/reverb-policies.yaml (GPS Global). Las policies de GKE y el
+# ReferenceGrant tienen que vivir junto al objeto al que apuntan; por eso están aquí y no en el
+# repo del clúster. Se aplican con `kubectl apply -k k8s` (están en el kustomization de reverb).
+#
+# 1) El Gateway solo admite rutas de su propio namespace (allowedRoutes: Same), así que la
+#    HTTPRoute vive en haproxy y apunta a un Service de deployer-api. Sin este permiso la ruta
+#    queda ResolvedRefs=False (RefNotPermitted).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: httproutes-haproxy-a-reverb
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: reverb
+    app.kubernetes.io/part-of: deployer
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: haproxy
+  to:
+    - group: ""
+      kind: Service
+      name: reverb
+---
+# 2) Backend service del balanceador para reverb.
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: reverb
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: reverb
+    app.kubernetes.io/part-of: deployer
+spec:
+  default:
+    # Para un WebSocket, timeoutSec es la VIDA MÁXIMA de la conexión. Default 30 s: cortaría
+    # cada WS a los 30 s. 86400 = mismo valor probado en producción en GPS Global.
+    timeoutSec: 86400
+    # Un pod de Reverb que sale del NEG (rollout, evicción) sigue sirviendo sus sockets hasta
+    # este tope; >= terminationGracePeriodSeconds del Deployment (30).
+    connectionDraining:
+      drainingTimeoutSec: 60
+    logging:
+      enabled: true
+      sampleRate: 1000000
+  targetRef:
+    group: ""
+    kind: Service
+    name: reverb
+---
+# 3) Sin esta policy el balanceador chequea GET / en 6001 y Reverb responde 404 -> backend
+#    UNHEALTHY -> 503 en ws.deployer.cl. Reverb contesta GET /up -> 200 {"health":"OK"}.
+#    El health check va directo al pod (no pasa por la HTTPRoute): por eso la ruta puede
+#    publicar solo /app y /up seguir funcionando.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: reverb
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: reverb
+    app.kubernetes.io/part-of: deployer
+spec:
+  default:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+    config:
+      type: HTTP
+      httpHealthCheck:
+        portSpecification: USE_SERVING_PORT
+        requestPath: /up
+  targetRef:
+    group: ""
+    kind: Service
+    name: reverb

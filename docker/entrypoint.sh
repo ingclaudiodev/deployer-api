@@ -4,11 +4,13 @@
 #   entrypoint octane      -> servidor HTTP (Octane + Swoole)   [por defecto]
 #   entrypoint horizon     -> workers de colas
 #   entrypoint scheduler   -> planificador (schedule:work)
+#   entrypoint reverb      -> servidor WebSocket (Laravel Reverb)
 #   entrypoint <comando>   -> cualquier otro comando, tal cual
 #
 # Variables que lo controlan (todas opcionales):
 #   PORT / OCTANE_PORT, OCTANE_WORKERS, OCTANE_TASK_WORKERS, OCTANE_MAX_REQUESTS,
-#   OCTANE_WATCH=true (requiere chokidar en node_modules), RUN_MIGRATIONS=true.
+#   OCTANE_WATCH=true (requiere chokidar en node_modules), RUN_MIGRATIONS=true,
+#   REVERB_SERVER_HOST / REVERB_SERVER_PORT, REVERB_DEBUG=true (loguea cada mensaje).
 set -eu
 
 cd /var/www/html
@@ -62,6 +64,15 @@ case "${1:-octane}" in
         ;;
     scheduler)
         set -- php artisan schedule:work
+        ;;
+    reverb)
+        set -- php artisan reverb:start \
+            --host="${REVERB_SERVER_HOST:-0.0.0.0}" \
+            --port="${REVERB_SERVER_PORT:-6001}"
+
+        if [ "${REVERB_DEBUG:-false}" = "true" ]; then
+            set -- "$@" --debug
+        fi
         ;;
 esac
 

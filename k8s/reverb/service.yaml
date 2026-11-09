@@ -1,0 +1,19 @@
+# Dentro del clúster app y horizon publican los eventos aquí: REVERB_HOST=reverb.deployer-api.svc,
+# REVERB_PORT=6001, REVERB_SCHEME=http (sin TLS interno). El navegador entra por la HTTPRoute
+# ws.deployer.cl (cluster-deployer/gateway/routes/reverb.yaml); ReferenceGrant y policies: policies.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: reverb
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: reverb
+    app.kubernetes.io/part-of: deployer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: reverb
+  ports:
+    - name: ws
+      port: 6001
+      targetPort: ws
