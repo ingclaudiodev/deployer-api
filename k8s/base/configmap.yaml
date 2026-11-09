@@ -75,13 +75,16 @@ data:
   # Token van en el Secret (MAIL_USERNAME / MAIL_PASSWORD). 465 = TLS implícito (smtps), sin
   # STARTTLS que degradar; ZeptoMail exige TLS >= 1.2 y no acepta el puerto 25. Sale a Internet por
   # el Cloud NAT del clúster (deployer-nat). Quien envía es Horizon: todo correo va por cola.
-  # El remitente DEBE ser del dominio verificado en ZeptoMail (backend.deployer.cl); con otro
-  # dominio el servidor rechaza el mensaje. Para usar @deployer.cl, verificar ese dominio antes.
+  # El remitente DEBE ser exactamente la dirección autorizada en el Mail Agent de ZeptoMail
+  # (consola > default > SMTP > "Dirección de remitente"): con cualquier otra, incluso del mismo
+  # dominio, responde "550 5.7.1 Sender is not allowed to relay emails" (comprobado 2026-11-09).
+  # Es `no_responder` con guion bajo, tal como se registró en Zoho. Para cambiarla, agregar la
+  # nueva dirección primero en la consola.
   MAIL_MAILER: smtp
   MAIL_SCHEME: smtps
   MAIL_HOST: smtp.zeptomail.com
   MAIL_PORT: "465"
-  MAIL_FROM_ADDRESS: no-responder@backend.deployer.cl
+  MAIL_FROM_ADDRESS: no_responder@backend.deployer.cl
   MAIL_FROM_NAME: deployer.cl
 
   # Autenticación (mismos valores que .env.example).

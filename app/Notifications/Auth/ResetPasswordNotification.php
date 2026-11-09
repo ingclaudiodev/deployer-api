@@ -26,6 +26,17 @@ class ResetPasswordNotification extends ResetPassword implements ShouldQueue
     use Queueable;
 
     /**
+     * Horizon tags (business rule: every queued job carries them). `mail` is the stable
+     * category to monitor; the second tag tells this email apart from the other ones.
+     *
+     * @return list<string>
+     */
+    public function tags(): array
+    {
+        return ['mail', 'mail:reset-password'];
+    }
+
+    /**
      * @param  User  $notifiable
      */
     public function toMail($notifiable): MailMessage

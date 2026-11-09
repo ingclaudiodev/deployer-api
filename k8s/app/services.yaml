@@ -1,12 +1,13 @@
 # Tres Services sobre los mismos pods de la API, cada uno con un papel:
 #
-# 1) app-headless (clusterIP None) = activeService del Rollout. El DNS devuelve un registro A por
-#    pod READY de la revisión activa (publishNotReadyAddresses false). HAProxy lo usa con
-#    server-template + balance leastconn (cluster-deployer/haproxy/haproxy-cm.yaml, backend
-#    backend-deployer): reparte por carga real, pod a pod, en vez del sorteo por conexión de la
-#    ClusterIP.
-# 2) app (ClusterIP) = respaldo de HAProxy (`backup`) y entrada para llamadas internas; incluye
-#    TODOS los pods Ready con el selector base (Argo no le toca el selector).
+# 1) app-headless (clusterIP None) = activeService del Rollout: sus endpoints son solo los pods
+#    READY de la revisión activa (publishNotReadyAddresses false). Es el `service` del
+#    HTTPScaledObject: el interceptor del KEDA HTTP Add-on reenvía directo a esos pods
+#    (directPodRouting). HAProxy ya no lo resuelve: habla con el interceptor
+#    (cluster-deployer/haproxy/haproxy-cm.yaml, backend backend-deployer).
+# 2) app (ClusterIP) = respaldo de HAProxy (`backup`, solo si el interceptor no responde y hay
+#    pods) y entrada para llamadas internas; incluye TODOS los pods Ready con el selector base
+#    (Argo no le toca el selector).
 # 3) app-preview = previewService del Rollout: la revisión nueva antes de promover.
 apiVersion: v1
 kind: Service

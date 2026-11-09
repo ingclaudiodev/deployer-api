@@ -16,4 +16,4 @@ resources:
 - reverb
 images:
 - name: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api
-  newTag: 0.1.3
+  newTag: 0.1.5

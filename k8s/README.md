@@ -1,7 +1,7 @@
 # Kubernetes (deployer-cluster, GKE Autopilot)
 
 Manifiestos de deployer-api para el clúster que administra `../cluster-deployer`
-(HAProxy, KEDA, Argo Rollouts, GMP, Gateway API). Una carpeta por servicio; el número es el
+(HAProxy, KEDA + HTTP Add-on, Argo Rollouts, GMP, Gateway API). Una carpeta por servicio; el número es el
 orden de aplicación. El tag de la imagen se fija una sola vez en `k8s/kustomization.yaml`.
 
 ## Versión de la imagen
@@ -18,7 +18,7 @@ reconstruir una versión que ya existe en Artifact Registry (`FORCE=1` para repu
 | 1 | `base/` | Namespace `deployer-api` (ComputeClass `n4-hyperdisk` por defecto, etiqueta del Gateway), ConfigMap `deployer-api-env`, plantilla del Secret `deployer-api-secrets` | cluster-deployer pasos 1-6c |
 | 2 | (Redis) | No está en este repo: es el Redis COMPARTIDO del clúster, `cluster-deployer/redis` (paso 5b), ns `redis`, 1 GiB, `redis.redis.svc.cluster.local:6379` | cluster-deployer paso 5b |
 | 3 | `migrate/` | Job `migrate` (`php artisan migrate --force`); se borra y reaplica en cada despliegue | base, Secret, Cloud SQL alcanzable |
-| 4 | `app/` | Rollout blue/green `app` (Octane), Services `app-headless` (activo, lo usa HAProxy), `app`, `app-preview`, PDB, ScaledObject KEDA 2-10 | Redis del clúster, migrate |
+| 4 | `app/` | Rollout blue/green `app` (Octane), Services `app-headless` (activo, lo usa el interceptor de KEDA), `app`, `app-preview`, PDB, HTTPScaledObject KEDA 0-2 (scale-to-zero) | Redis del clúster, migrate, KEDA HTTP Add-on (cluster-deployer paso 6e) |
 | 5 | `horizon/` | Deployment `horizon` (colas), 1 réplica, apagado limpio | Redis del clúster, migrate |
 | 6 | `scheduler/` | Deployment `scheduler` (`schedule:work`), 1 réplica, Recreate | Redis del clúster |
 | 7 | `reverb/` | Deployment + Service `reverb`, ReferenceGrant y políticas del balanceador (`policies.yaml`). La HTTPRoute `ws.deployer.cl` NO está aquí: vive con todas las rutas del clúster en `cluster-deployer/gateway/routes/reverb.yaml` | base; Gateway del clúster (cluster-deployer paso 7) para que el WS sea público |
@@ -89,10 +89,12 @@ kubectl -n deployer-api logs job/migrate
 kubectl apply -k k8s
 kubectl argo rollouts get rollout app -n deployer-api --watch     # plugin: brew install argoproj/tap/kubectl-argo-rollouts
 
-# 8. Verificar dentro del clúster
-kubectl -n deployer-api get rollout,deploy,sts,svc,scaledobject,pdb,referencegrant,gcpbackendpolicy,healthcheckpolicy
-kubectl -n deployer-api port-forward svc/app 8000:8000 &  sleep 5
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/up            # 200
+# 8. Verificar dentro del clúster. La API puede estar en 0 pods: la prueba válida es por HAProxy
+#    con el Host público (pasa por el interceptor de KEDA, que la despierta); un port-forward a
+#    svc/app con 0 pods falla.
+kubectl -n deployer-api get rollout,deploy,sts,svc,httpscaledobject,scaledobject,pdb,referencegrant,gcpbackendpolicy,healthcheckpolicy
+kubectl -n haproxy port-forward svc/haproxy-service 18080:80 &  sleep 5
+curl -s -o /dev/null -m 300 -w '%{http_code} %{time_total}s\n' -H 'Host: backend.deployer.cl' http://localhost:18080/up   # 200 (la primera tarda si estaba en 0)
 kill %1
 kubectl -n deployer-api exec deploy/horizon -- php artisan horizon:status    # Horizon is running.
 ```
@@ -113,8 +115,9 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
 ## Cómo encaja con el clúster
 
 - **Entrada HTTP:** `https://backend.deployer.cl` → Gateway → HAProxy (backend `backend-deployer`)
-  → `app-headless.deployer-api.svc.cluster.local:8000` (leastconn pod a pod; respaldo
-  `app.deployer-api.svc.cluster.local:8000`). CORS lo contesta HAProxy para `https://deployer.cl`.
+  → interceptor del KEDA HTTP Add-on (`keda-add-ons-http-interceptor-proxy.keda.svc:8080`) → pods
+  Ready de `app-headless` (directo, por endpoints). Respaldo de HAProxy si el interceptor no
+  responde: `app.deployer-api.svc.cluster.local:8000`. CORS lo contesta HAProxy para `https://deployer.cl`.
 - **WebSocket:** `wss://ws.deployer.cl` → Gateway → Service `reverb` directo (sin HAProxy).
   La HTTPRoute está en el repo del clúster (`cluster-deployer/gateway/routes/reverb.yaml`, ns
   `haproxy`, solo `PathPrefix /app`: el handshake de Pusher/Echo; la API HTTP firmada
@@ -140,8 +143,18 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   `kubectl argo rollouts restart app -n deployer-api`). Prueba síncrona desde el pod NUEVO de
   Horizon, que salta la cola y valida NAT + TLS + credenciales + dominio remitente:
   `kubectl -n deployer-api exec deploy/horizon -- php artisan tinker --execute 'Mail::raw("prueba", fn ($m) => $m->to("tu@correo")->subject("ZeptoMail OK"));'`
-- **Escalar:** KEDA escala el Rollout `app` 2-10 por CPU/memoria. Reverb con `replicas > 1`
-  requiere `REVERB_SCALING_ENABLED=true` (el Redis compartido ya está).
+- **Escalar (scale-to-zero):** el KEDA HTTP Add-on escala el Rollout `app` entre 0 y 2 por
+  peticiones en vuelo (`k8s/app/httpscaledobject.yaml`: 4 por pod, 15 min sin tráfico → 0 pods).
+  Dormida, la primera petición a `backend.deployer.cl` la retiene el interceptor hasta que haya un
+  pod Ready (tope 300 s): 10-30 s si el nodo n4 sigue vivo, 1-3 min si Autopilot tuvo que crear
+  uno. Horizon, scheduler y Reverb NO duermen (1 réplica fija). Cualquier monitor externo o cron
+  que pegue a la API cada pocos minutos la mantiene despierta y anula el ahorro.
+  El operator del add-on crea el ScaledObject `app` (trigger `external-push`) a partir del
+  HTTPScaledObject; no editar ese ScaledObject a mano. Migración desde el ScaledObject por
+  CPU/memoria que existía antes (`kubectl apply -k` no poda): instalar el add-on
+  (cluster-deployer paso 6e), `kubectl -n deployer-api delete scaledobject app`, `kubectl apply -k k8s`
+  y después cambiar HAProxy al interceptor; el orden importa y está en el script de ese paso.
+  Reverb con `replicas > 1` requiere `REVERB_SCALING_ENABLED=true` (el Redis compartido ya está).
 
 ## Pendientes conocidos (código de la app, no de k8s)
 
