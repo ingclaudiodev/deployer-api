@@ -7,11 +7,19 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Queue\Attributes\Backoff;
+use Illuminate\Queue\Attributes\Tries;
 
 /**
  * The one-time code that completes a sign-in. Queued, like every outbound email
  * of this app, so the request never waits on SMTP; Horizon delivers it.
+ *
+ * Retried on a transient SMTP failure (ZeptoMail is an external service): three attempts,
+ * 10 s then 60 s apart, so the email arrives late rather than never. Both delays stay far
+ * below the lifetime of what the email carries.
  */
+#[Tries(3)]
+#[Backoff([10, 60])]
 class TwoFactorCodeNotification extends Notification implements ShouldQueue
 {
     use Queueable;
