@@ -71,12 +71,17 @@ data:
   # Si la app sube archivos, pasar a GCS (disco `gcs` con un bucket) antes de usarlo.
   FILESYSTEM_DISK: local
 
-  # Correo: host/puerto/remitente aquí; usuario y clave en el Secret. Ajustar al proveedor real.
+  # Correo: Zoho ZeptoMail por SMTP (Mail Agent "default"). Usuario `emailapikey` y el Send Mail
+  # Token van en el Secret (MAIL_USERNAME / MAIL_PASSWORD). 465 = TLS implícito (smtps), sin
+  # STARTTLS que degradar; ZeptoMail exige TLS >= 1.2 y no acepta el puerto 25. Sale a Internet por
+  # el Cloud NAT del clúster (deployer-nat). Quien envía es Horizon: todo correo va por cola.
+  # El remitente DEBE ser del dominio verificado en ZeptoMail (backend.deployer.cl); con otro
+  # dominio el servidor rechaza el mensaje. Para usar @deployer.cl, verificar ese dominio antes.
   MAIL_MAILER: smtp
-  MAIL_SCHEME: "null"
-  MAIL_HOST: smtp.example.com
-  MAIL_PORT: "587"
-  MAIL_FROM_ADDRESS: no-responder@deployer.cl
+  MAIL_SCHEME: smtps
+  MAIL_HOST: smtp.zeptomail.com
+  MAIL_PORT: "465"
+  MAIL_FROM_ADDRESS: no-responder@backend.deployer.cl
   MAIL_FROM_NAME: deployer.cl
 
   # Autenticación (mismos valores que .env.example).

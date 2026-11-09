@@ -32,7 +32,7 @@ variables del entorno del contenedor, que llegan por `envFrom` desde tres objeto
 |---|---|---|
 | Variables no secretas de app, horizon, scheduler y migrate | ConfigMap `deployer-api-env` | `k8s/base/configmap.yaml` |
 | Variables no secretas de Reverb (anuncia otro host) | ConfigMap `reverb-config` | `k8s/reverb/configmap.yaml` |
-| `APP_KEY`, `DB_PASSWORD`, `REVERB_APP_*`, claves de Passport, webhooks, correo | Secret `deployer-api-secrets` (se crea a mano, nunca se commitea) | plantilla `k8s/base/secret.example.yaml` |
+| `APP_KEY`, `DB_PASSWORD`, `REVERB_APP_*`, claves de Passport, webhooks, usuario y token SMTP de ZeptoMail | Secret `deployer-api-secrets` (se crea a mano, nunca se commitea) | plantilla `k8s/base/secret.example.yaml` |
 | `OCTANE_WORKERS`, `PHP_MEMORY_LIMIT` y similares por proceso | `env:` de cada Deployment/Rollout | `k8s/app/rollout.yaml`, etc. |
 
 Claves de `.env.example` que a propósito no están en el clúster: `AWS_*` y `MEMCACHED_*` (no se
@@ -73,7 +73,7 @@ kubectl -n deployer-api create secret generic deployer-api-secrets \
   --from-literal=REVERB_APP_ID='...' --from-literal=REVERB_APP_KEY='...' --from-literal=REVERB_APP_SECRET='...' \
   --from-file=PASSPORT_PRIVATE_KEY=storage/oauth-private.key --from-file=PASSPORT_PUBLIC_KEY=storage/oauth-public.key \
   --from-literal=LOG_SLACK_WEBHOOK_URL='' --from-literal=SLACK_WEBHOOK_URL='' \
-  --from-literal=MAIL_USERNAME='' --from-literal=MAIL_PASSWORD=''
+  --from-literal=MAIL_USERNAME='emailapikey' --from-literal=MAIL_PASSWORD='<Send Mail Token SMTP de ZeptoMail>'
 
 # 5. Redis: es el compartido del clúster (cluster-deployer paso 5b). Solo comprobar que responde:
 kubectl -n redis exec statefulset/redis -- redis-cli ping     # PONG
@@ -129,6 +129,17 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   cuota SSD del proyecto no permite más nodos Autopilot por defecto. Todo corre en nodos n4.
 - **Redis:** compartido con el resto del clúster (`cluster-deployer/redis`, ns `redis`, 1 GiB,
   `volatile-lru`: cache y sesiones se desalojan antes que las colas). `REDIS_HOST=redis.redis.svc.cluster.local`.
+- **Correo:** Zoho ZeptoMail por SMTP, `smtp.zeptomail.com:465` (TLS implícito), usuario
+  `emailapikey` y Send Mail Token en el Secret. El remitente (`MAIL_FROM_ADDRESS`) debe ser del
+  dominio verificado en la consola de ZeptoMail (`backend.deployer.cl`). Los pods son privados y
+  salen por el Cloud NAT `deployer-nat`. Quien habla con ZeptoMail es Horizon (todo correo es
+  `ShouldQueue`). Cargar o rotar el token SIN recrear el Secret entero (un `create --dry-run | apply`
+  con solo estas dos claves borraría APP_KEY, DB_PASSWORD y Passport):
+  `kubectl -n deployer-api patch secret deployer-api-secrets --type merge -p '{"stringData":{"MAIL_USERNAME":"emailapikey","MAIL_PASSWORD":"<token>"}}'`
+  y después `kubectl -n deployer-api rollout restart deploy/horizon` (app es un Rollout de Argo:
+  `kubectl argo rollouts restart app -n deployer-api`). Prueba síncrona desde el pod NUEVO de
+  Horizon, que salta la cola y valida NAT + TLS + credenciales + dominio remitente:
+  `kubectl -n deployer-api exec deploy/horizon -- php artisan tinker --execute 'Mail::raw("prueba", fn ($m) => $m->to("tu@correo")->subject("ZeptoMail OK"));'`
 - **Escalar:** KEDA escala el Rollout `app` 2-10 por CPU/memoria. Reverb con `replicas > 1`
   requiere `REVERB_SCALING_ENABLED=true` (el Redis compartido ya está).
 
