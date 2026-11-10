@@ -14,3 +14,4 @@ resources:
   - deployment.yaml
   - service.yaml
   - policies.yaml
+  - pdb.yaml

@@ -28,6 +28,10 @@ spec:
       labels:
         app.kubernetes.io/name: db-tunnel
         app.kubernetes.io/part-of: deployer
+      annotations:
+        # El autoscaler no debe mover este pod al consolidar nodos: cada mudanza corta el túnel
+        # ~2 min (hasta que el balanceador da por sano el NEG nuevo). Ver pdb.yaml.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
       terminationGracePeriodSeconds: 10
       securityContext:

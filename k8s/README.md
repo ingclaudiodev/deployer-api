@@ -145,7 +145,9 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   `kubectl -n deployer-api logs deploy/db-tunnel` (`session#N: Open ... proxy#R:5432=>5432: Listening`),
   `kubectl -n deployer-api exec deploy/horizon -- php artisan db:show`. Rotar credenciales: recrear
   `db-tunnel-auth`, `rollout restart deploy/db-tunnel`, actualizar `~/.config/deployer-db-tunnel/env`
-  y `launchctl kickstart -k gui/$(id -u)/cl.deployer.db-tunnel`.
+  y `launchctl kickstart -k gui/$(id -u)/cl.deployer.db-tunnel`. Si el pod `db-tunnel` cambia de
+  nodo, el balanceador tarda ~2 min en dar por sano el NEG nuevo y el cliente reintenta cada 15 s:
+  por eso lleva PDB `minAvailable: 1` y `safe-to-evict: "false"` (`db-tunnel/pdb.yaml`).
 - **Nodos:** el namespace usa la ComputeClass `n4-hyperdisk` (cluster-deployer paso 6c) porque la
   cuota SSD del proyecto no permite más nodos Autopilot por defecto. Todo corre en nodos n4.
 - **Redis:** compartido con el resto del clúster (`cluster-deployer/redis`, ns `redis`, 1 GiB,
