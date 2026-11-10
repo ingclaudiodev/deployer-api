@@ -1,0 +1,38 @@
+# Dos Services sobre el mismo pod, separados porque sirven a clientes distintos:
+#   db-tunnel      :8080  lo referencia la HTTPRoute (cluster-deployer/gateway/routes/db-tunnel.yaml)
+#                         y llevan sus políticas (policies.yaml). Solo lo usa el Gateway.
+#   postgres-local :5432  lo usan app, horizon, scheduler y migrate como DB_HOST
+#                         (postgres-local.deployer-api.svc.cluster.local, ConfigMap deployer-api-env).
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-tunnel
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: db-tunnel
+    app.kubernetes.io/part-of: deployer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: db-tunnel
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-local
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: db-tunnel
+    app.kubernetes.io/part-of: deployer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: db-tunnel
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

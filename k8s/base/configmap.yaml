@@ -37,16 +37,23 @@ data:
   LOG_SLACK_EMOJI: ":rotating_light:"
   LOG_SLACK_LEVEL: error
 
-  # Cloud SQL deployerbd (Postgres 18) por Private Service Connect: endpoint deployerbd-psc en la
-  # red `default` del cluster (gcloud compute forwarding-rules list). Sin IP pública ni proxy.
-  # La instancia es sslMode ENCRYPTED_ONLY: sslmode=require o rechaza la conexión.
+  # Base de datos: el Postgres 18 LOCAL del Mac de desarrollo, por el túnel inverso de
+  # k8s/db-tunnel (desde 2026-11-10; Cloud SQL salía demasiado caro mientras el servicio está en
+  # desarrollo). postgres-local es el Service del túnel: el chisel del Mac (launchd
+  # cl.deployer.db-tunnel) publica su 127.0.0.1:5432 ahí. Si el Mac duerme o pierde red, la app
+  # recibe "connection refused" hasta que el cliente reconecta. Cada consulta cuesta ~180 ms de
+  # ida y vuelta Chile <-> us-central1 (Octane y Horizon reutilizan la conexión; el handshake es
+  # ~1 s). La base es `deployer`, la MISMA que usa el desarrollo en el Mac: un `migrate` o un
+  # seeder local se ve en producción. Usuario `claudio` (superusuario local; ver README).
+  # DB_SSLMODE=disable: el Postgres del Mac no tiene SSL y el tramo Internet ya va cifrado por
+  # el WebSocket TLS del túnel; dentro del clúster es pod a pod.
+  # La instancia Cloud SQL deployerbd se eliminó el 2026-11-10; no hay vuelta atrás a ella.
   DB_CONNECTION: pgsql
-  DB_HOST: 10.128.0.50
+  DB_HOST: postgres-local.deployer-api.svc.cluster.local
   DB_PORT: "5432"
-  DB_DATABASE: deployerbd
-  # Usuario propio de la app (no `postgres`): gcloud sql users create deployer --instance=deployerbd ...
-  DB_USERNAME: deployer
-  DB_SSLMODE: require
+  DB_DATABASE: deployer
+  DB_USERNAME: claudio
+  DB_SSLMODE: disable
 
   # Redis COMPARTIDO del cluster (cluster-deployer/redis, paso 5b; 1 GiB, volatile-lru): cache,
   # sesiones, colas de Horizon y pub/sub de Reverb. Sin clave: solo alcanzable dentro del cluster.
@@ -100,6 +107,8 @@ data:
   AUTH_TWO_FACTOR_VERIFY_PER_MINUTE: "10"
   AUTH_TWO_FACTOR_TRUST_DAYS: "30"
   AUTH_TWO_FACTOR_UNVERIFIED_USER_DAYS: "7"
+  # Rol (slug de la tabla roles) que recibe toda cuenta nueva: super_admin | admin | usuario | soporte
+  AUTH_DEFAULT_ROLE: "admin"
 
   # Octane (docker/entrypoint.sh). Código inmutable en la imagen: sin revalidar opcache.
   OCTANE_SERVER: swoole

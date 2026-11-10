@@ -1,0 +1,16 @@
+# 8º: túnel inverso hacia el Postgres LOCAL del Mac de desarrollo (sustituye a Cloud SQL mientras
+# el servicio está en desarrollo: Cloud SQL deployerbd salía demasiado caro).
+#   kubectl apply -k k8s   (está en el kustomization raíz)
+# Cómo funciona (ver deployment.yaml): el Mac está detrás de CGNAT (no admite conexiones entrantes),
+# así que es el Mac quien se conecta HACIA el clúster: un cliente chisel abre un WebSocket por
+# https://db-tunnel.deployer.cl (Gateway, TLS, cert wildcard) contra el servidor chisel de este
+# Deployment y le pide un "reverse remote": el servidor escucha en :5432 y todo lo que entra ahí
+# viaja por el WebSocket hasta el 127.0.0.1:5432 del Mac. Los pods usan DB_HOST=postgres-local.
+# El Secret db-tunnel-auth (users.json + key) se crea a mano: ver secret.example.yaml.
+# La HTTPRoute pública NO está aquí: cluster-deployer/gateway/routes/db-tunnel.yaml (ns haproxy).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - policies.yaml

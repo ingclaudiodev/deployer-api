@@ -33,6 +33,7 @@ variables del entorno del contenedor, que llegan por `envFrom` desde tres objeto
 | Variables no secretas de app, horizon, scheduler y migrate | ConfigMap `deployer-api-env` | `k8s/base/configmap.yaml` |
 | Variables no secretas de Reverb (anuncia otro host) | ConfigMap `reverb-config` | `k8s/reverb/configmap.yaml` |
 | `APP_KEY`, `DB_PASSWORD`, `REVERB_APP_*`, claves de Passport, webhooks, usuario y token SMTP de ZeptoMail | Secret `deployer-api-secrets` (se crea a mano, nunca se commitea) | plantilla `k8s/base/secret.example.yaml` |
+| Credenciales del túnel a la base local (`users.json`, clave del servidor chisel) | Secret `db-tunnel-auth` (a mano) | plantilla `k8s/db-tunnel/secret.example.yaml` |
 | `OCTANE_WORKERS`, `PHP_MEMORY_LIMIT` y similares por proceso | `env:` de cada Deployment/Rollout | `k8s/app/rollout.yaml`, etc. |
 
 Claves de `.env.example` que a propósito no están en el clúster: `AWS_*` y `MEMCACHED_*` (no se
@@ -52,8 +53,9 @@ si no está, editar `newTag` a mano en `k8s/kustomization.yaml`) y `php` para ge
 gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com
 gcloud artifacts repositories create deployer --repository-format=docker --location=us-central1 --description="Imágenes de deployer-api"
 
-# 1. Usuario de base de datos propio (Cloud SQL deployerbd, Postgres 18, por Private Service Connect)
-gcloud sql users create deployer --instance=deployerbd --password='<generar-una-clave>'
+# 1. Base de datos: es el Postgres local del Mac por el túnel de k8s/db-tunnel (ver "Cómo encaja").
+#    Crear el Secret db-tunnel-auth (k8s/db-tunnel/secret.example.yaml) y dejar corriendo el
+#    cliente en el Mac (launchd cl.deployer.db-tunnel) antes del paso 6.
 
 # 2. Imagen (Cloud Build: los nodos son amd64; la imagen local del Mac es arm64). El tag es la
 #    versión de version.txt; `sh k8s/deploy.sh` hace esto y los pasos 6 y 7. A mano:
@@ -126,8 +128,24 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   app y horizon publican a `reverb.deployer-api.svc:6001` con las mismas `REVERB_APP_*` del
   Secret compartido. Hasta que exista el Gateway (cluster-deployer paso 7) el WS solo se puede
   probar por port-forward.
-- **Base de datos:** Cloud SQL `deployerbd` sin IP pública; endpoint PSC `10.128.0.50` en la red
-  del clúster, `sslmode=require` (la instancia es `ENCRYPTED_ONLY`).
+- **Base de datos:** el Postgres 18 LOCAL del Mac de desarrollo (base `deployer`, usuario `claudio`),
+  por un túnel inverso (`k8s/db-tunnel`, desde 2026-11-10; Cloud SQL se eliminó por costo). El Mac
+  está detrás de CGNAT (no acepta conexiones entrantes), así que es él quien se conecta: un cliente
+  [chisel](https://github.com/jpillora/chisel) (`~/.local/bin/chisel`, lanzado por launchd
+  `~/Library/LaunchAgents/cl.deployer.db-tunnel.plist`, config en `~/.config/deployer-db-tunnel/`)
+  abre un WebSocket por `https://db-tunnel.deployer.cl` (HTTPRoute en
+  `cluster-deployer/gateway/routes/db-tunnel.yaml`, directo al Service `db-tunnel:8080`, cert
+  wildcard) y el servidor chisel del Deployment `db-tunnel` publica el `127.0.0.1:5432` del Mac en el
+  Service `postgres-local:5432` (= `DB_HOST`). `DB_SSLMODE=disable`: el tramo Internet ya va por TLS.
+  Consecuencias: cada consulta cuesta ~180 ms (Chile ↔ us-central1; el handshake ~1 s, Octane y
+  Horizon reutilizan la conexión); si el Mac duerme o pierde red la app da `connection refused`
+  hasta que el cliente reconecta (reintenta sin límite; el balanceador cierra el WS cada 24 h); y
+  la base es la MISMA del desarrollo local: un `migrate`/seeder en el Mac se ve en producción.
+  Diagnóstico: `tail ~/Library/Logs/deployer-db-tunnel.log` en el Mac (`Connected (Latency ...)`),
+  `kubectl -n deployer-api logs deploy/db-tunnel` (`session#N: Open ... proxy#R:5432=>5432: Listening`),
+  `kubectl -n deployer-api exec deploy/horizon -- php artisan db:show`. Rotar credenciales: recrear
+  `db-tunnel-auth`, `rollout restart deploy/db-tunnel`, actualizar `~/.config/deployer-db-tunnel/env`
+  y `launchctl kickstart -k gui/$(id -u)/cl.deployer.db-tunnel`.
 - **Nodos:** el namespace usa la ComputeClass `n4-hyperdisk` (cluster-deployer paso 6c) porque la
   cuota SSD del proyecto no permite más nodos Autopilot por defecto. Todo corre en nodos n4.
 - **Redis:** compartido con el resto del clúster (`cluster-deployer/redis`, ns `redis`, 1 GiB,
