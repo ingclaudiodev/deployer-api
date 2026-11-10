@@ -73,7 +73,7 @@ class TrustedDevice extends Model
     /**
      * Expired rows are dead weight; `model:prune` removes them.
      *
-     * @return Builder<$this>
+     * @return Builder<static>
      */
     public function prunable(): Builder
     {

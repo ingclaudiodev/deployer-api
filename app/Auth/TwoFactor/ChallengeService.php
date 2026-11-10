@@ -86,8 +86,8 @@ class ChallengeService
         $user = $challenge->user;
 
         // The code only ever reaches the account's inbox, so confirming it proves the address.
-        if ($user->email_verified_at === null) {
-            $user->forceFill(['email_verified_at' => now()])->save();
+        if (! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
             event(new Verified($user));
         }
 

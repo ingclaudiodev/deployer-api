@@ -85,7 +85,7 @@ class TwoFactorChallenge extends Model
     /**
      * Finished challenges are useless after a day; `model:prune` removes them.
      *
-     * @return Builder<$this>
+     * @return Builder<static>
      */
     public function prunable(): Builder
     {

@@ -5,6 +5,7 @@ use App\Models\User;
 use App\Notifications\Auth\TwoFactorCodeNotification;
 use Database\Factories\TwoFactorChallengeFactory;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
@@ -33,6 +34,7 @@ test('a visitor registers and gets the emailed code before any session', functio
     expect($user->email_verified_at)->toBeNull();
     Event::assertDispatched(Registered::class);
     Notification::assertSentTo($user, TwoFactorCodeNotification::class);
+    Notification::assertNotSentTo($user, VerifyEmail::class);
 
     $challenge = TwoFactorChallenge::query()->findOrFail($response->json('challengeId'));
     expect($challenge->user_id)->toBe($user->id);

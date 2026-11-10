@@ -9,7 +9,7 @@ test('me returns the public shape of the authenticated user', function (): void 
 
     $this->getJson(route('auth.me'))
         ->assertOk()
-        ->assertExactJson(['id' => $user->id, 'email' => 'grace@acme.com', 'name' => 'Grace']);
+        ->assertExactJson(['id' => $user->id, 'email' => 'grace@acme.com', 'name' => 'Grace', 'role' => 'admin']);
 });
 
 test('me rejects anonymous requests with json', function (): void {

@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -31,6 +32,36 @@ class UserFactory extends Factory
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * Give the user the role with this slug instead of the configured default.
+     */
+    public function role(string $slug): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role_id' => Role::findBySlug($slug)->id,
+        ]);
+    }
+
+    public function superAdmin(): static
+    {
+        return $this->role(Role::SUPER_ADMIN);
+    }
+
+    public function admin(): static
+    {
+        return $this->role(Role::ADMIN);
+    }
+
+    public function usuario(): static
+    {
+        return $this->role(Role::USUARIO);
+    }
+
+    public function soporte(): static
+    {
+        return $this->role(Role::SOPORTE);
     }
 
     /**
