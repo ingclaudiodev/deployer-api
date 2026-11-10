@@ -147,7 +147,8 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   `db-tunnel-auth`, `rollout restart deploy/db-tunnel`, actualizar `~/.config/deployer-db-tunnel/env`
   y `launchctl kickstart -k gui/$(id -u)/cl.deployer.db-tunnel`. Si el pod `db-tunnel` cambia de
   nodo, el balanceador tarda ~2 min en dar por sano el NEG nuevo y el cliente reintenta cada 15 s:
-  por eso lleva PDB `minAvailable: 1` y `safe-to-evict: "false"` (`db-tunnel/pdb.yaml`).
+  por eso lleva PDB `minAvailable: 1` y `safe-to-evict: "false"` (`db-tunnel/pdb.yaml`), que frenan
+  el scale down pero no una actualización de nodo: esas siguen moviendo el pod de vez en cuando.
 - **Nodos:** el namespace usa la ComputeClass `n4-hyperdisk` (cluster-deployer paso 6c) porque la
   cuota SSD del proyecto no permite más nodos Autopilot por defecto. Todo corre en nodos n4.
 - **Redis:** compartido con el resto del clúster (`cluster-deployer/redis`, ns `redis`, 1 GiB,
