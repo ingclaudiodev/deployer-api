@@ -131,9 +131,9 @@ La asignación de dominio de Cloud Run es gratuita pero Google la mantiene en *p
 latencia). La alternativa soportada es un balanceador HTTPS externo delante de los servicios,
 que cuesta del orden de US$18 al mes: no vale la pena mientras el servicio esté en desarrollo.
 
-Restos del clúster que pueden seguir cobrando y conviene revisar en la consola: el Cloud NAT
-`deployer-nat`, la IP reservada del Gateway (`deployer-gateway-ip`), discos de PVC que hayan
-quedado y los recursos PSC huérfanos de la antigua Cloud SQL (`deployerbd-psc`, `deployerbd-psc-ip`).
+Del clúster ya se eliminaron la IP del Gateway y el Cloud NAT `deployer-nat` con su router (Cloud
+Run sale a Internet directo y la VM tiene IP pública: nada usa NAT). Conviene revisar en la consola
+que no queden discos de PVC sueltos.
 
 ## Cada despliegue
 
@@ -195,7 +195,9 @@ cliente y no la de un proxy de Google: si los logs muestran siempre la misma IP,
   probable de ajustar en el primer despliegue: CPU fraccionada del sidecar (`cpu: '0.5'`; si Cloud
   Run la rechaza, subir a `'1'`), el rango de `TRUSTED_PROXIES`, y que la asignación de dominio
   deje pasar WebSockets en `ws.deployer.cl`.
-- Firewall: la regla `deployer-infra-backends` admite 5432/6379 solo desde la etiqueta de red de
-  Cloud Run. La red `default` suele traer además `default-allow-internal` (todo 10.128.0.0/9), que
-  deja pasar ese tráfico igual y puede ocultar que la regla por etiqueta no funciona. Revisar con
-  `gcloud compute firewall-rules list --filter=network:default` y decidir si se quiere más estricto.
+- Firewall: Postgres (5432) y Redis (6379) de la VM solo aceptan a las instancias de Cloud Run:
+  `deployer-infra-backends-deny` (prioridad 900) los niega a todos, anulando `default-allow-internal`,
+  y `deployer-infra-backends` (800) los abre a la etiqueta de red `deployer-run`. Si tras el primer
+  despliegue la API no llega a la base o a Redis (timeout, no "connection refused"), la etiqueta de
+  origen no está funcionando: `gcloud compute firewall-rules update deployer-infra-backends-deny --disabled`
+  para confirmarlo.

@@ -65,10 +65,17 @@ vm)
          --direction=INGRESS --allow=tcp:443 --source-ranges=0.0.0.0/0 --target-tags="$VM_TAG" \
          --description="Túnel chisel del Postgres del Mac (deployer-api)"
   # Postgres (5432, el extremo del túnel) y Redis (6379): solo desde las instancias de Cloud Run.
+  # Son dos reglas porque la red `default` trae default-allow-internal (todo 10.128.0.0/9, prioridad
+  # 65534), que por sí sola dejaría entrar a cualquier recurso de la red: la de prioridad 900 niega
+  # esos puertos a todos y la de 800 (gana el número menor) los abre solo a la etiqueta de Cloud Run.
   exists $G compute firewall-rules describe deployer-infra-backends \
-    || $G compute firewall-rules create deployer-infra-backends --network="$NETWORK" \
+    || $G compute firewall-rules create deployer-infra-backends --network="$NETWORK" --priority=800 \
          --direction=INGRESS --allow=tcp:5432,tcp:6379 --source-tags="$RUN_TAG" --target-tags="$VM_TAG" \
          --description="Cloud Run (deployer-api) -> Postgres por túnel y Redis"
+  exists $G compute firewall-rules describe deployer-infra-backends-deny \
+    || $G compute firewall-rules create deployer-infra-backends-deny --network="$NETWORK" --priority=900 \
+         --direction=INGRESS --action=DENY --rules=tcp:5432,tcp:6379 --source-ranges=0.0.0.0/0 --target-tags="$VM_TAG" \
+         --description="Postgres (túnel) y Redis de deployer-infra: solo Cloud Run (deployer-infra-backends)"
 
   # e2-micro + disco estándar de 10 GB: dentro de la capa gratuita de Compute Engine en esta
   # región. pd-standard no consume la cuota SSD_TOTAL_GB (la que limitaba al clúster).
