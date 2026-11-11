@@ -4,7 +4,6 @@ namespace App\Services\Ai;
 
 use App\Exceptions\Ai\GenerativeModelException;
 use App\Services\Ai\Contracts\GenerativeModel;
-use DomainException;
 use Google\ApiCore\ApiException;
 use Google\ApiCore\ValidationException;
 use Google\Cloud\AIPlatform\V1\Candidate;
@@ -44,33 +43,28 @@ class VertexAiGenerativeModel implements GenerativeModel
 
     public function generateJson(string $systemInstruction, string $prompt, array $schema): GeneratedJson
     {
-        if (blank($this->project)) {
-            throw GenerativeModelException::notConfigured('VERTEX_AI_PROJECT');
-        }
-
-        try {
-            $response = $this->client()->generateContent(
-                $this->request($systemInstruction, $prompt, $schema),
-                ['timeoutMillis' => $this->timeoutSeconds * 1000],
-            );
-        } catch (ApiException|ValidationException|DomainException $exception) {
-            throw GenerativeModelException::requestFailed($exception);
-        }
-
-        return $this->toGeneratedJson($response);
-    }
-
-    /**
-     * @param  array<string, mixed>  $schema
-     */
-    private function request(string $systemInstruction, string $prompt, array $schema): GenerateContentRequest
-    {
         $responseSchema = new Schema;
         $responseSchema->mergeFromJsonString((string) json_encode($schema, JSON_THROW_ON_ERROR));
 
+        $answer = $this->generate(
+            $systemInstruction,
+            [['role' => 'user', 'text' => $prompt]],
+            $this->generationConfig()
+                ->setResponseMimeType('application/json')
+                ->setResponseSchema($responseSchema),
+        );
+
+        return new GeneratedJson($answer->text, $answer->model, $answer->inputTokens, $answer->outputTokens, $answer->thinkingTokens);
+    }
+
+    public function converse(string $systemInstruction, array $messages): GeneratedText
+    {
+        return $this->generate($systemInstruction, $messages, $this->generationConfig());
+    }
+
+    private function generationConfig(): GenerationConfig
+    {
         $generationConfig = (new GenerationConfig)
-            ->setResponseMimeType('application/json')
-            ->setResponseSchema($responseSchema)
             ->setCandidateCount(1)
             ->setMaxOutputTokens($this->maxOutputTokens)
             ->setTemperature($this->temperature);
@@ -81,14 +75,41 @@ class VertexAiGenerativeModel implements GenerativeModel
             );
         }
 
-        return (new GenerateContentRequest)
-            ->setModel("projects/{$this->project}/locations/{$this->location}/publishers/google/models/{$this->model}")
-            ->setSystemInstruction((new Content)->setParts([(new Part)->setText($systemInstruction)]))
-            ->setContents([(new Content)->setRole('user')->setParts([(new Part)->setText($prompt)])])
-            ->setGenerationConfig($generationConfig);
+        return $generationConfig;
     }
 
-    private function toGeneratedJson(GenerateContentResponse $response): GeneratedJson
+    /**
+     * @param  array<int, array{role: 'user'|'model', text: string}>  $messages
+     *
+     * @throws GenerativeModelException
+     */
+    private function generate(string $systemInstruction, array $messages, GenerationConfig $generationConfig): GeneratedText
+    {
+        if (blank($this->project)) {
+            throw GenerativeModelException::notConfigured('VERTEX_AI_PROJECT');
+        }
+
+        $request = (new GenerateContentRequest)
+            ->setModel("projects/{$this->project}/locations/{$this->location}/publishers/google/models/{$this->model}")
+            ->setSystemInstruction((new Content)->setParts([(new Part)->setText($systemInstruction)]))
+            ->setContents(array_map(
+                fn (array $message): Content => (new Content)
+                    ->setRole($message['role'])
+                    ->setParts([(new Part)->setText($message['text'])]),
+                $messages,
+            ))
+            ->setGenerationConfig($generationConfig);
+
+        try {
+            $response = $this->client()->generateContent($request, ['timeoutMillis' => $this->timeoutSeconds * 1000]);
+        } catch (ApiException|ValidationException $exception) {
+            throw GenerativeModelException::requestFailed($exception);
+        }
+
+        return $this->toGeneratedText($response);
+    }
+
+    private function toGeneratedText(GenerateContentResponse $response): GeneratedText
     {
         /** @var Candidate|null $candidate */
         $candidate = $response->getCandidates()[0] ?? null;
@@ -109,8 +130,8 @@ class VertexAiGenerativeModel implements GenerativeModel
 
         $usage = $response->getUsageMetadata();
 
-        return new GeneratedJson(
-            json: $text,
+        return new GeneratedText(
+            text: $text,
             model: $response->getModelVersion() ?: $this->model,
             inputTokens: (int) $usage?->getPromptTokenCount(),
             outputTokens: (int) $usage?->getCandidatesTokenCount(),
@@ -122,7 +143,7 @@ class VertexAiGenerativeModel implements GenerativeModel
      * Built on first use and kept: the OAuth token it holds is reused by every
      * later call of the same worker instead of being requested again.
      *
-     * @throws ValidationException
+     * @throws ValidationException also when the machine has no Application Default Credentials
      */
     private function client(): PredictionServiceClient
     {
