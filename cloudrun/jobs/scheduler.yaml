@@ -1,0 +1,41 @@
+# Cloud Run Job del planificador: una ejecución = un `php artisan schedule:run`, que corre las
+# tareas de routes/console.php que toquen en ese minuto (horizon:snapshot cada 5 min, passport:purge
+# y model:prune diarios) y termina. Lo dispara Cloud Scheduler con el cron de config.sh (SCHEDULE).
+# Reemplaza al Deployment `scheduler` (`schedule:work`), que necesitaba un pod encendido 24/7.
+#
+# Es un Job y no una llamada HTTP a la API a propósito: un ping cada 5 minutos mantendría la API
+# despierta todo el día y anularía el ahorro de escalar a cero.
+#
+# No aplicar este archivo directamente: sh cloudrun/deploy.sh
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: ${SCHEDULER_JOB}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${SUBNET}","tags":["${RUN_TAG}"]}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          serviceAccountName: ${RUN_SA_EMAIL}
+          maxRetries: 0
+          timeoutSeconds: 600
+          containers:
+            - name: scheduler
+              image: ${IMAGE}
+              args: ['php', 'artisan', 'schedule:run', '--no-interaction']
+              env:
+                - name: PHP_MEMORY_LIMIT
+                  value: 256M
+                # @env common.env
+                # @secrets secrets.map
+              resources:
+                limits:
+                  cpu: '1'
+                  memory: 512Mi

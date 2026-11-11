@@ -1,0 +1,55 @@
+# Servicio Cloud Run del servidor WebSocket (Laravel Reverb). Misma imagen que la API; el
+# entrypoint recibe `reverb` y lanza `reverb:start` en el 6001. Reemplaza al Deployment `reverb`.
+#
+# Facturación por petición (la de por defecto): un WebSocket abierto ES una petición en curso, así
+# que la instancia tiene CPU y se cobra mientras haya al menos un navegador conectado; cuando se
+# cierra el último, baja a 0. Cada pestaña del panel abierta mantiene viva esta instancia.
+#
+# maxScale 1 a propósito: Reverb guarda las conexiones en memoria; con 2 instancias un evento solo
+# llegaría a los sockets de la que lo recibió (salvo REVERB_SCALING_ENABLED=true con Redis).
+# timeoutSeconds 3600: Cloud Run corta todo WebSocket a los 60 minutos como máximo; pusher-js
+# (laravel-echo) reconecta solo.
+#
+# No aplicar este archivo directamente: sh cloudrun/deploy.sh
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ${REVERB_SERVICE}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '1'
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      serviceAccountName: ${RUN_SA_EMAIL}
+      # Sockets simultáneos que admite la única instancia (1000 es el tope de Cloud Run).
+      containerConcurrency: 1000
+      timeoutSeconds: 3600
+      containers:
+        - name: reverb
+          image: ${IMAGE}
+          args: ['reverb']
+          ports:
+            - name: http1
+              containerPort: 6001
+          env:
+            # @env reverb.env
+            # @secrets secrets-reverb.map
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          # Reverb responde /up con {"health":"OK"} en su propio puerto.
+          startupProbe:
+            httpGet:
+              path: /up
+              port: 6001
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12

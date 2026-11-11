@@ -215,7 +215,8 @@ return [
     'environments' => [
         'production' => [
             'supervisor-1' => [
-                'maxProcesses' => 10,
+                // Cloud Run runs Horizon as a sidecar with little memory: size it per environment.
+                'maxProcesses' => (int) env('HORIZON_MAX_PROCESSES', 10),
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
