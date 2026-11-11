@@ -2,7 +2,11 @@
 
 namespace App\Providers;
 
+use App\Services\Ai\Contracts\GenerativeModel;
+use App\Services\Ai\VertexAiGenerativeModel;
+use App\Services\CloudArchitectAgent;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +20,26 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(GenerativeModel::class, function (): GenerativeModel {
+            /** @var array{project: string|null, location: string, model: string, max_output_tokens: int, temperature: float, thinking_budget: int|string|null, timeout: int} $config */
+            $config = config('services.vertex_ai');
+
+            return new VertexAiGenerativeModel(
+                project: $config['project'],
+                location: $config['location'],
+                model: $config['model'],
+                maxOutputTokens: $config['max_output_tokens'],
+                temperature: $config['temperature'],
+                thinkingBudget: blank($config['thinking_budget']) ? null : (int) $config['thinking_budget'],
+                timeoutSeconds: $config['timeout'],
+            );
+        });
+
+        $this->app->bind(CloudArchitectAgent::class, fn (Application $app): CloudArchitectAgent => new CloudArchitectAgent(
+            model: $app->make(GenerativeModel::class),
+            maxFiles: (int) config('services.cloud_architect.max_files'),
+            maxManifestCharacters: (int) config('services.cloud_architect.max_manifest_characters'),
+        ));
     }
 
     /**
