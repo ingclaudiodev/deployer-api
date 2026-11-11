@@ -4,8 +4,9 @@
 #
 #   sh cloudrun/setup.sh apis        habilita las APIs
 #   sh cloudrun/setup.sh iam         cuentas de servicio y permisos
-#   sh cloudrun/secrets.sh           (otro script) copia los secretos del clúster a Secret Manager
+#   sh cloudrun/secrets.sh           (otro script) crea los secretos en Secret Manager
 #   sh cloudrun/setup.sh vm          IPs fijas, firewall y la VM deployer-infra (túnel + Redis)
+#   (DNS del túnel -> VM y huella nueva en el Mac: README, "Primera vez", pasos 5 y 6)
 #   sh cloudrun/deploy.sh            (otro script) primera versión de los servicios y jobs
 #   sh cloudrun/setup.sh public      abre la API y Reverb a Internet (sin esto responden 403)
 #   sh cloudrun/setup.sh scheduler   Cloud Scheduler -> Job deployer-scheduler
@@ -34,8 +35,17 @@ iam)
   # escribe logs.
   exists $G iam service-accounts describe "$VM_SA_EMAIL" \
     || $G iam service-accounts create "$VM_SA" --display-name="VM deployer-infra (túnel + Redis)"
-  $G projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$VM_SA_EMAIL" \
-    --role=roles/logging.logWriter --condition=None --quiet >/dev/null
+  # Una cuenta recién creada tarda unos segundos en ser visible para IAM ("does not exist"):
+  # se reintenta en vez de fallar.
+  n=0
+  until $G projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$VM_SA_EMAIL" \
+      --role=roles/logging.logWriter --condition=None --quiet >/dev/null 2>&1; do
+    n=$((n + 1))
+    if [ "$n" -ge 6 ]; then
+      echo "No se pudo dar roles/logging.logWriter a $VM_SA_EMAIL; repite: sh cloudrun/setup.sh iam" >&2; exit 1
+    fi
+    echo "  IAM aún no ve la cuenta nueva; reintento $n/5 en 10 s"; sleep 10
+  done
   echo "Cuentas de servicio listas: $RUN_SA_EMAIL, $VM_SA_EMAIL"
   ;;
 
@@ -83,7 +93,7 @@ vm)
 VM $VM_NAME: IP interna $INFRA_IP (DB_HOST y REDIS_HOST), IP pública $PUBLIC_IP.
 Log del arranque:  gcloud compute instances get-serial-port-output $VM_NAME --project=$PROJECT --zone=$ZONE | grep startup-script
 El servidor chisel NO obtiene su certificado hasta que $TUNNEL_DOMAIN apunte a $PUBLIC_IP
-(paso "domains"): ese cambio de DNS es el que mueve el túnel del clúster a la VM.
+(paso "domains", punto 1). Hacerlo ANTES de deploy.sh: las migraciones necesitan el túnel.
 EOF
   ;;
 
@@ -111,11 +121,11 @@ scheduler)
 domains)
   PUBLIC_IP=$($G compute addresses describe "$INFRA_PUBLIC_IP_NAME" --region="$REGION" --format='value(address)' 2>/dev/null || echo '<IP pública de la VM: correr antes el paso vm>')
   cat <<EOF
-Este paso NO ejecuta nada: son los cambios que mueven el tráfico real del clúster a Cloud Run.
-Hacerlos en este orden, cuando los servicios ya respondan por su URL *.run.app (README, "Cutover").
-La zona de Cloud DNS es deployercl; anota los registros actuales antes de cambiarlos (rollback).
+Este paso NO ejecuta nada: imprime los cambios de DNS (zona deployercl de Cloud DNS).
+El punto 1 va ANTES de deploy.sh; el punto 2, cuando los servicios ya respondan por su URL *.run.app.
+Si un registro ya no existe en la zona, usar \`create\` en vez de \`update\`/\`delete\`.
 
-1. Túnel de la base de datos (mueve el Postgres del clúster a la VM; el Mac no se toca):
+1. Túnel de la base de datos (además, actualizar la huella en el Mac: la imprime secrets.sh):
    gcloud dns record-sets update $TUNNEL_DOMAIN. --project=$PROJECT --zone=deployercl --type=A --ttl=300 --rrdatas=$PUBLIC_IP
 
 2. API y WebSocket (asignación de dominio de Cloud Run: gratis, certificado administrado):

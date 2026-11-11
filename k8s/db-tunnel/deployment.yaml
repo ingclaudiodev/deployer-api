@@ -28,10 +28,10 @@ spec:
       labels:
         app.kubernetes.io/name: db-tunnel
         app.kubernetes.io/part-of: deployer
-      annotations:
-        # El autoscaler no debe mover este pod al consolidar nodos: cada mudanza corta el túnel
-        # ~2 min (hasta que el balanceador da por sano el NEG nuevo). Ver pdb.yaml.
-        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+      # SIN `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` (quitada el 2026-11-10): en
+      # Autopilot esa anotación convierte el pod en "extended duration" y le exige un nodo propio
+      # (afinidad cloud.google.com/extended-duration-pods). Con cobro por pod ese nodo nuevo no cabe
+      # en la cuota SSD y el pod queda Pending = BD caída. Contra mudanzas queda solo el PDB.
     spec:
       terminationGracePeriodSeconds: 10
       securityContext:

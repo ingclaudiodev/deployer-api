@@ -4,7 +4,8 @@ Despliegue de deployer-api en Cloud Run, en reemplazo del clúster GKE (`k8s/`).
 misma (`docker/Dockerfile`, target `app`): ya escuchaba en `$PORT`, corre sin root y se construye
 en amd64 con Cloud Build. Lo que cambia es quién hace lo que antes hacía el clúster.
 
-> Estado: archivos listos, **nada aplicado todavía**. `k8s/` sigue intacto y es el rollback.
+> Estado (2026-11-11): el clúster GKE **se eliminó** por costo; producción está caída hasta completar
+> estos pasos. `k8s/` queda solo como referencia de cómo estaba: ya no es un rollback.
 
 ## Qué reemplaza a qué
 
@@ -37,9 +38,10 @@ deploy.sh ─────────────────────▶ Job
 
 - **La base de datos sigue siendo el Postgres del Mac.** Lo que quedó expuesto a Internet es solo
   el WebSocket de chisel; el puerto 5432 vivía *dentro* del clúster. Sin clúster, el servidor chisel
-  necesita otra casa con IP pública: la VM. El Mac no cambia nada (misma URL, mismo usuario, misma
-  huella): basta apuntar `db-tunnel.deployer.cl` a la VM. Siguen valiendo los ~180 ms por consulta,
-  el "connection refused" si el Mac duerme y que es la MISMA base del desarrollo.
+  necesita otra casa con IP pública: la VM. En el Mac se mantiene la URL y el usuario; solo cambia
+  la huella del servidor (la clave anterior se perdió con el clúster; `secrets.sh` indica cómo
+  actualizarla). Siguen valiendo los ~180 ms por consulta, el "connection refused" si el Mac
+  duerme y que es la MISMA base del desarrollo.
 - **Horizon es un sidecar, no un servicio siempre encendido.** Todos los jobs nacen de una petición
   HTTP (código 2FA, restablecer contraseña, bienvenida por WebSocket, alertas), así que basta que
   Horizon viva mientras vive la instancia de la API. Para que tenga CPU después de que Octane
@@ -77,77 +79,61 @@ Sin tráfico el total es la IP de la VM más los jobs del planificador.
 
 ## Primera vez
 
-Requisitos: `gcloud` con una cuenta que administre `claudio-orellana-services`
+Requisito: `gcloud` con una cuenta que administre `claudio-orellana-services`
 (`gcloud config set account <cuenta>`: la cuenta activa por defecto de este Mac es de otro proyecto
-y recibe 403) y acceso con `kubectl` a `deployer-cluster` para copiar los secretos. `secrets.sh`
-usa siempre el contexto `gke_claudio-orellana-services_us-central1_deployer-cluster`, sin importar
-cuál esté activo.
+y recibe 403).
 
-Antes de empezar, comparar la configuración VIVA con `env/common.env`: se copió del ConfigMap del
-repo (`k8s/base/configmap.yaml`) y el clúster ya divergió del repo alguna vez.
+Los secretos de producción se perdieron con el clúster. `secrets.sh` los rehace: toma del `.env`
+local lo que es igual (clave de la base, webhooks de Slack), genera nuevos `APP_KEY`, claves de
+Passport, id y secreto de Reverb, clave de Redis y clave del túnel, reutiliza la clave pública de
+Reverb que ya tiene el frontend, y pide por teclado el token de ZeptoMail (hay que sacarlo de su
+consola: Mail Agent `default` > SMTP). Consecuencia: los tokens y sesiones anteriores dejan de
+valer y todos vuelven a iniciar sesión.
 
-```sh
-kubectl --context=gke_claudio-orellana-services_us-central1_deployer-cluster -n deployer-api \
-  get cm deployer-api-env -o go-template='{{range $k, $v := .data}}{{$k}}={{$v}}{{"\n"}}{{end}}' | sort > /tmp/vivo.env
-grep -Ev '^\s*(#|$)' cloudrun/env/common.env | sort | diff /tmp/vivo.env -
-# Diferencias esperadas: DB_HOST, REDIS_HOST, REVERB_HOST/PORT/SCHEME, TRUSTED_PROXIES, HORIZON_MAX_PROCESSES.
-```
+`env/common.env` se copió del ConfigMap del repo (`k8s/base/configmap.yaml`), no del clúster vivo,
+que ya no se puede consultar. Si algo se había cambiado a mano en el clúster, no está aquí.
 
 ```sh
-# 0. Subir la versión (config/cors.php y HORIZON_MAX_PROCESSES son código nuevo) y commitear
-#    (no usar `git add -A` si hay otros cambios pendientes que no son de esto, p. ej. en k8s/)
-echo 0.1.8 > version.txt
-git add version.txt cloudrun config/cors.php config/horizon.php .env.example tests/Feature/CorsTest.php
-git commit -m "version 0.1.8 (Cloud Run)"
-
 sh cloudrun/setup.sh apis        # 1. APIs
 sh cloudrun/setup.sh iam         # 2. cuentas de servicio
-sh cloudrun/secrets.sh           # 3. secretos: clúster -> Secret Manager (con el clúster aún vivo)
+sh cloudrun/secrets.sh           # 3. secretos en Secret Manager (pide el token de ZeptoMail)
 sh cloudrun/setup.sh vm          # 4. VM deployer-infra: IPs, firewall, chisel y Redis
-DRY_RUN=1 sh cloudrun/deploy.sh  # 5. opcional: ver los YAML finales sin desplegar nada
-sh cloudrun/deploy.sh            # 6. construye, migra y crea servicios y jobs
-sh cloudrun/setup.sh public      # 7. abre la API y Reverb a Internet (antes responden 403)
-sh cloudrun/setup.sh scheduler   # 8. Cloud Scheduler -> Job del planificador
+sh cloudrun/setup.sh domains     # 5. imprime los comandos de DNS; ejecutar SOLO el del túnel (punto 1)
+#    y actualizar la huella en el Mac con los dos comandos que imprimió secrets.sh
+tail -f ~/Library/Logs/deployer-db-tunnel.log   # 6. esperar "Connected (Latency ...)"
+sh cloudrun/deploy.sh            # 7. construye, migra y crea servicios y jobs (DRY_RUN=1 para solo ver los YAML)
+sh cloudrun/setup.sh public      # 8. abre la API y Reverb a Internet (antes responden 403)
+sh cloudrun/setup.sh scheduler   # 9. Cloud Scheduler -> Job del planificador
+#    10. probar por la URL *.run.app (sección Verificar) y recién entonces los dominios (punto 2 de `domains`)
 ```
 
-Hasta el cutover, Cloud Run y el clúster conviven. Dos cosas a tener presentes en esa ventana:
+El orden importa en dos puntos:
 
-- El paso 6 ejecuta `migrate` contra la base **solo si el túnel ya llega a la VM**. Antes del
-  cutover del túnel la VM no tiene el 5432 abierto y el job falla con "connection refused": correr
-  el primer despliegue con `SKIP_MIGRATE=1` (la base ya está migrada por el clúster) o hacer antes
-  el paso 1 del cutover.
-- El túnel es **uno solo**: mientras `db-tunnel.deployer.cl` apunte al clúster, la API de Cloud Run
-  arranca y responde `/up`, pero cualquier ruta que toque la base falla. La API de Cloud Run solo
-  se puede probar de verdad después de mover el túnel, y en ese momento el clúster pierde la base.
-  Para probar SIN cortar al clúster: crear la VM con otro host
-  (`TUNNEL_DOMAIN=db-tunnel2.deployer.cl sh cloudrun/setup.sh vm`, más su registro A) y lanzar en el
-  Mac un segundo cliente chisel contra ese host; los dos túneles publican el mismo Postgres.
+- **Secretos antes que la VM**: su script de arranque lee de Secret Manager las credenciales del
+  túnel y la clave de Redis; si no existen, falla (se ve en el log de arranque que imprime el paso 4).
+- **Túnel antes que el despliegue**: `deploy.sh` ejecuta `migrate`, que necesita llegar al Postgres
+  del Mac por la VM. Sin túnel falla con "connection refused" y no despliega nada. El servidor
+  chisel pide su certificado a Let's Encrypt en la primera conexión, por eso necesita que
+  `db-tunnel.deployer.cl` ya apunte a la VM. Si urge desplegar sin base: `SKIP_MIGRATE=1`.
 
-## Cutover
+## Dominios
 
-`sh cloudrun/setup.sh domains` imprime los comandos exactos con las IP reales. Orden:
+`sh cloudrun/setup.sh domains` imprime los comandos exactos con las IP reales:
 
-1. **Túnel**: registro A de `db-tunnel.deployer.cl` → IP pública de la VM. El cliente del Mac
-   reconecta solo (reintenta cada 15 s) en cuanto expira el TTL; chisel pide su certificado a Let's
-   Encrypt en la primera conexión. Desde aquí la API del clúster ya no tiene base de datos.
-   Comprobar: `tail ~/Library/Logs/deployer-db-tunnel.log` (`Connected (Latency ...)`).
-2. **Probar Cloud Run por su URL `*.run.app`** (sección Verificar) antes de tocar los dominios.
-3. **Dominios**: asignar `backend.deployer.cl` y `ws.deployer.cl` a los servicios y cambiar sus
-   registros a `CNAME ghs.googlehosted.com.`. El certificado tarda unos 15 minutos; en ese lapso el
-   dominio responde con error de TLS, así que conviene hacerlo en horario sin uso.
-4. **Apagar el clúster** solo cuando lo anterior lleve un día funcionando. Borrar el clúster es
-   irreversible y elimina también HAProxy, KEDA, Redis y el Gateway (`../cluster-deployer`). Las
-   rutas del Gateway hoy son solo estos tres hosts (`cluster-deployer/gateway/routes/`: backend,
-   reverb, db-tunnel y la redirección a HTTPS); confirmar con `kubectl get httproute -A` que no
-   haya otra antes de borrar. Quedan además por limpiar el Cloud NAT `deployer-nat`, la IP del
-   Gateway y los recursos PSC huérfanos de la antigua Cloud SQL.
+1. **Túnel**: registro A de `db-tunnel.deployer.cl` → IP pública de la VM (paso 5 de arriba).
+2. **API y WebSocket**: asignar `backend.deployer.cl` y `ws.deployer.cl` a los servicios y cambiar
+   sus registros a `CNAME ghs.googlehosted.com.`. El certificado tarda unos 15 minutos.
+
+Los registros A actuales de esos tres hosts apuntan a la IP del Gateway del clúster, que ya no
+existe. Si alguno ya no está en la zona, usar `record-sets create` en vez de `update`/`delete`.
 
 La asignación de dominio de Cloud Run es gratuita pero Google la mantiene en *preview* (puede sumar
 latencia). La alternativa soportada es un balanceador HTTPS externo delante de los servicios,
 que cuesta del orden de US$18 al mes: no vale la pena mientras el servicio esté en desarrollo.
 
-Rollback: devolver los tres registros DNS a sus valores anteriores (anotarlos antes) y el clúster
-vuelve a servir todo. Por eso `k8s/` no se toca.
+Restos del clúster que pueden seguir cobrando y conviene revisar en la consola: el Cloud NAT
+`deployer-nat`, la IP reservada del Gateway (`deployer-gateway-ip`), discos de PVC que hayan
+quedado y los recursos PSC huérfanos de la antigua Cloud SQL (`deployerbd-psc`, `deployerbd-psc-ip`).
 
 ## Cada despliegue
 

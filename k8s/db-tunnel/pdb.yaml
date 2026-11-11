@@ -1,8 +1,9 @@
 # El 2026-11-10 el autoscaler apagó el nodo del pod del túnel ("deleting pod for node scale down"):
 # el pod renació en otro nodo pero el balanceador tardó ~2 min en dar por sano el NEG nuevo y
 # mientras tanto el cliente del Mac no podía conectar => la API dio "connection refused" a la BD.
-# minAvailable 1 con una sola réplica, junto con la anotación safe-to-evict=false del Deployment:
-# reduce las mudanzas (el scale down del autoscaler las respeta), pero NO las elimina: en una
+# minAvailable 1 con una sola réplica reduce las mudanzas (el scale down del autoscaler lo respeta),
+# pero NO las elimina. (La anotación safe-to-evict=false se quitó el 2026-11-10: en Autopilot exige
+# un nodo dedicado que la cuota SSD no permite; ver deployment.yaml.) En una
 # actualización o mantenimiento de nodo GKE Autopilot respeta el PDB un tiempo limitado y luego
 # desaloja igual. Cuando pase, ~2 min de "connection refused" en la BD hasta que el cliente del Mac
 # reconecta. Una rotación del Deployment (Recreate) sigue siendo posible: es un cambio nuestro.

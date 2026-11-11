@@ -147,10 +147,13 @@ horizon y scheduler; rolling de reverb) y `git commit -m "deploy <version>"`.
   `db-tunnel-auth`, `rollout restart deploy/db-tunnel`, actualizar `~/.config/deployer-db-tunnel/env`
   y `launchctl kickstart -k gui/$(id -u)/cl.deployer.db-tunnel`. Si el pod `db-tunnel` cambia de
   nodo, el balanceador tarda ~2 min en dar por sano el NEG nuevo y el cliente reintenta cada 15 s:
-  por eso lleva PDB `minAvailable: 1` y `safe-to-evict: "false"` (`db-tunnel/pdb.yaml`), que frenan
-  el scale down pero no una actualización de nodo: esas siguen moviendo el pod de vez en cuando.
-- **Nodos:** el namespace usa la ComputeClass `n4-hyperdisk` (cluster-deployer paso 6c) porque la
-  cuota SSD del proyecto no permite más nodos Autopilot por defecto. Todo corre en nodos n4.
+  por eso lleva PDB `minAvailable: 1` (`db-tunnel/pdb.yaml`), que frena el scale down pero no una
+  actualización de nodo. NO usar `safe-to-evict: "false"`: en Autopilot pide un nodo dedicado que la
+  cuota SSD no permite (el pod queda Pending y la BD cae; pasó el 2026-11-10).
+- **Nodos:** desde el 2026-11-10 el namespace usa la clase Autopilot general (cobro por pod, sale
+  en la factura como Kubernetes Engine). Todo cabe en el único nodo `ek` que permite la cuota SSD:
+  GKE achica su pod de reserva (`gke-system-balloon-pod`) para hacer espacio. Techo: ~7,9 vCPU en
+  total para todo el clúster; un pod que no quepa queda Pending (no hay cuota para otro nodo).
 - **Redis:** compartido con el resto del clúster (`cluster-deployer/redis`, ns `redis`, 1 GiB,
   `volatile-lru`: cache y sesiones se desalojan antes que las colas). `REDIS_HOST=redis.redis.svc.cluster.local`.
 - **Correo:** Zoho ZeptoMail por SMTP, `smtp.zeptomail.com:465` (TLS implícito), usuario
