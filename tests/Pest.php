@@ -2,6 +2,7 @@
 
 use App\Services\Ai\Contracts\GenerativeModel;
 use App\Services\Ai\GeneratedJson;
+use App\Services\Ai\GeneratedText;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Client;
 use Tests\TestCase;
@@ -57,13 +58,16 @@ function createPersonalAccessClient(): Client
 }
 
 /**
- * Stands in for Vertex AI: answers with the given JSON and keeps the prompt it was sent.
+ * Stands in for Vertex AI: answers with the given text and keeps what it was sent.
  */
 function fakeGenerativeModel(string|Throwable $answer): GenerativeModel
 {
     $model = new class($answer) implements GenerativeModel
     {
         public ?string $prompt = null;
+
+        /** @var array<int, array<int, array{role: string, text: string}>> */
+        public array $conversations = [];
 
         public function __construct(private readonly string|Throwable $answer) {}
 
@@ -76,6 +80,18 @@ function fakeGenerativeModel(string|Throwable $answer): GenerativeModel
             }
 
             return new GeneratedJson($this->answer, 'gemini-test', inputTokens: 900, outputTokens: 350);
+        }
+
+        public function converse(string $systemInstruction, array $messages): GeneratedText
+        {
+            $this->prompt = $systemInstruction;
+            $this->conversations[] = $messages;
+
+            if ($this->answer instanceof Throwable) {
+                throw $this->answer;
+            }
+
+            return new GeneratedText($this->answer, 'gemini-test', inputTokens: 40, outputTokens: 12);
         }
     };
 
