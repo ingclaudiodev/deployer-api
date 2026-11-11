@@ -31,6 +31,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PORT,
         );
 
+        // The only browser sign-in is the panel's: `auth` sends guests there and `guest`
+        // sends a signed-in operator back to the overview.
+        $middleware->redirectGuestsTo(fn (): string => route('panel.login'));
+        $middleware->redirectUsersTo(fn (): string => route('panel.dashboard'));
+
         $middleware->web(append: [
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,

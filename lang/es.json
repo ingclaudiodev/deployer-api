@@ -4,6 +4,7 @@
     "Hello!": "¡Hola!",
     "Regards": "Saludos",
     "Whoops!": "Ups",
+    "The email or password is incorrect.": "El correo o la contraseña no son correctos.",
     "The code is not valid.": "El código no es válido.",
     "This sign-in attempt is no longer valid. Please sign in again.": "Este intento de acceso ya no es válido. Vuelve a entrar con tu contraseña.",
     "Too many wrong codes. Please sign in again.": "Demasiados códigos incorrectos. Vuelve a entrar con tu contraseña.",

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -39,8 +40,29 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'name' => config('app.name'),
             'auth' => [
-                'user' => $request->user(),
+                'user' => fn (): ?array => $this->sharedUser($request),
             ],
+        ];
+    }
+
+    /**
+     * Only what the pages render: the whole model would leak every future column to the browser.
+     *
+     * @return array{id: int, name: string, email: string, role: string}|null
+     */
+    private function sharedUser(Request $request): ?array
+    {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            return null;
+        }
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role->name,
         ];
     }
 }
