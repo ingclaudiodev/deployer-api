@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Ai\Contracts\GenerativeModel;
+use App\Services\Ai\GeneratedJson;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Client;
 use Tests\TestCase;
@@ -52,4 +54,62 @@ expect()->extend('toBeOne', function () {
 function createPersonalAccessClient(): Client
 {
     return Client::factory()->asPersonalAccessTokenClient()->create();
+}
+
+/**
+ * Stands in for Vertex AI: answers with the given JSON and keeps the prompt it was sent.
+ */
+function fakeGenerativeModel(string|Throwable $answer): GenerativeModel
+{
+    $model = new class($answer) implements GenerativeModel
+    {
+        public ?string $prompt = null;
+
+        public function __construct(private readonly string|Throwable $answer) {}
+
+        public function generateJson(string $systemInstruction, string $prompt, array $schema): GeneratedJson
+        {
+            $this->prompt = $prompt;
+
+            if ($this->answer instanceof Throwable) {
+                throw $this->answer;
+            }
+
+            return new GeneratedJson($this->answer, 'gemini-test', inputTokens: 900, outputTokens: 350);
+        }
+    };
+
+    app()->instance(GenerativeModel::class, $model);
+
+    return $model;
+}
+
+/**
+ * @param  array<string, mixed>  $overrides
+ */
+function analysisJson(array $overrides = []): string
+{
+    return (string) json_encode(array_replace_recursive([
+        'summary' => 'API Express con Postgres y Redis.',
+        'stack' => ['language' => 'JavaScript', 'framework' => 'Express', 'runtime_version' => '22', 'package_manager' => 'npm'],
+        'container' => ['has_dockerfile' => false, 'port' => 3000, 'start_command' => 'node src/server.js'],
+        'services' => [
+            ['name' => 'orders-api', 'kind' => 'service', 'purpose' => 'API HTTP', 'command' => 'node src/server.js', 'public' => true, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 3, 'concurrency' => 80, 'timeout_seconds' => 60, 'cpu_always_allocated' => false],
+            ['name' => 'migrate', 'kind' => 'job', 'purpose' => 'Migraciones', 'command' => 'npx prisma migrate deploy', 'public' => false, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 1, 'concurrency' => 1, 'timeout_seconds' => 600, 'cpu_always_allocated' => false],
+        ],
+        'files' => [
+            ['path' => 'Dockerfile', 'content' => "FROM node:22-alpine\nUSER node\nCMD [\"node\", \"src/server.js\"]"],
+            ['path' => 'cloudrun/config.sh', 'content' => 'PROJECT=${PROJECT:-acme}'],
+            ['path' => 'cloudrun/deploy.sh', 'content' => '#!/bin/sh'],
+            ['path' => 'cloudrun/services/orders-api.yaml', 'content' => 'kind: Service'],
+            ['path' => 'cloudrun/jobs/migrate.yaml', 'content' => 'kind: Job'],
+        ],
+        'env_vars' => [
+            ['name' => 'DATABASE_URL', 'description' => 'Conexión a Postgres', 'secret' => true],
+            ['name' => 'PORT', 'description' => 'Puerto HTTP', 'secret' => false],
+        ],
+        'backing_services' => [['type' => 'postgres', 'reason' => 'Prisma']],
+        'warnings' => ['BullMQ necesita un worker siempre encendido.'],
+        'confidence' => 'medium',
+    ], $overrides));
 }

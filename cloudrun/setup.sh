@@ -23,7 +23,8 @@ exists() { "$@" >/dev/null 2>&1; }
 case "${1:-}" in
 apis)
   $G services enable run.googleapis.com secretmanager.googleapis.com compute.googleapis.com \
-    cloudscheduler.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+    cloudscheduler.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
+    aiplatform.googleapis.com
   ;;
 
 iam)
@@ -46,6 +47,9 @@ iam)
     fi
     echo "  IAM aún no ve la cuenta nueva; reintento $n/5 en 10 s"; sleep 10
   done
+  # Vertex AI (Gemini): la app llama al modelo como deployer-api-run, sin llaves ni archivos.
+  $G projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$RUN_SA_EMAIL" \
+    --role=roles/aiplatform.user --condition=None --quiet >/dev/null
   echo "Cuentas de servicio listas: $RUN_SA_EMAIL, $VM_SA_EMAIL"
   ;;
 
