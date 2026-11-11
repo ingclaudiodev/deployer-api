@@ -7,8 +7,9 @@ use App\Http\Controllers\Panel\LogoutController;
 use App\Http\Middleware\EnsureSuperAdmin;
 use Illuminate\Support\Facades\Route;
 
+// A plain value, not a closure: `php artisan optimize` caches the routes at container start.
 Route::inertia('/', 'Welcome', [
-    'frontendUrl' => fn (): string => (string) config('app.frontend_url'),
+    'frontendUrl' => (string) config('app.frontend_url'),
 ])->name('home');
 
 // Operations panel: a browser session of the same users the API authenticates.

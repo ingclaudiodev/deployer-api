@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\TrustedDevice;
 use App\Models\TwoFactorChallenge;
 use App\Models\User;
+use App\Services\Panel\DashboardMetrics;
 use App\Services\Panel\SystemHealth;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Testing\AssertableInertia;
@@ -94,6 +96,22 @@ test('the live state of the services is loaded after the page', function (): voi
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->missing('health')
             ->loadDeferredProps(fn (AssertableInertia $reload) => $reload->where('health', $snapshot)));
+});
+
+test('refreshing the live state does not run the account queries again', function (): void {
+    $this->mock(SystemHealth::class, fn (MockInterface $mock) => $mock->shouldReceive('snapshot')->andReturn([]));
+    $this->mock(DashboardMetrics::class, fn (MockInterface $mock) => $mock->shouldNotReceive('overview', 'usersPerRole', 'signupsPerDay', 'recentUsers', 'system'));
+
+    $this->actingAs(User::factory()->superAdmin()->create())
+        ->get(route('panel.dashboard'), [
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
+            'X-Inertia-Partial-Component' => 'panel/Dashboard',
+            'X-Inertia-Partial-Data' => 'health',
+        ])
+        ->assertOk()
+        ->assertJsonPath('props.health', [])
+        ->assertJsonMissingPath('props.stats');
 });
 
 test('only super administrators may open Horizon', function (string $role, bool $allowed): void {

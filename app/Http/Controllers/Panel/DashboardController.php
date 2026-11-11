@@ -22,11 +22,12 @@ class DashboardController extends Controller
     public function __invoke(DashboardMetrics $metrics, SystemHealth $health): Response
     {
         return Inertia::render('panel/Dashboard', [
-            'stats' => $metrics->overview(),
-            'roles' => $metrics->usersPerRole(),
-            'signups' => $metrics->signupsPerDay(self::SIGNUP_DAYS),
-            'recentUsers' => $metrics->recentUsers(self::RECENT_USERS),
-            'system' => $metrics->system(),
+            // Closures: the 15 s reload asks only for `health` and must not rerun these queries.
+            'stats' => fn (): array => $metrics->overview(),
+            'roles' => fn (): array => $metrics->usersPerRole(),
+            'signups' => fn (): array => $metrics->signupsPerDay(self::SIGNUP_DAYS),
+            'recentUsers' => fn (): array => $metrics->recentUsers(self::RECENT_USERS),
+            'system' => fn (): array => $metrics->system(),
             'horizonUrl' => url((string) config('horizon.path')),
             'health' => Inertia::defer(fn (): array => $health->snapshot()),
         ]);
