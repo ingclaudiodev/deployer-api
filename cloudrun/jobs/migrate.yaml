@@ -1,0 +1,38 @@
+# Cloud Run Job de migraciones: `php artisan migrate --force` con la imagen recién construida,
+# ANTES de cambiar la API a esa versión. Lo ejecuta deploy.sh en cada despliegue (reemplaza al Job
+# k8s/migrate). maxRetries 0: si falla se mira el log y se corrige, no se reintenta a ciegas.
+# OJO: la base es la MISMA del desarrollo local (el Postgres del Mac).
+#
+# No aplicar este archivo directamente: sh cloudrun/deploy.sh
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: ${MIGRATE_JOB}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${SUBNET}","tags":["${RUN_TAG}"]}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          serviceAccountName: ${RUN_SA_EMAIL}
+          maxRetries: 0
+          timeoutSeconds: 600
+          containers:
+            - name: migrate
+              image: ${IMAGE}
+              args: ['php', 'artisan', 'migrate', '--force', '--no-interaction']
+              env:
+                - name: PHP_MEMORY_LIMIT
+                  value: 256M
+                # @env common.env
+                # @secrets secrets.map
+              resources:
+                limits:
+                  cpu: '1'
+                  memory: 512Mi

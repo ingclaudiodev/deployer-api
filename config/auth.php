@@ -122,6 +122,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Default Role
+    |--------------------------------------------------------------------------
+    |
+    | Slug of the role every newly created account receives when none is set
+    | explicitly. It must match a row of the `roles` table (super_admin, admin,
+    | usuario, soporte). For now every account is an administrator.
+    |
+    */
+
+    'default_role' => env('AUTH_DEFAULT_ROLE', 'admin'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Welcome Broadcast
     |--------------------------------------------------------------------------
     |

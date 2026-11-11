@@ -6,9 +6,7 @@ metadata:
   name: deployer-api
   labels:
     app.kubernetes.io/part-of: deployer
-    # Todos los pods de este namespace van a la ComputeClass n4-hyperdisk del cluster
-    # (cluster-deployer, paso 6c), igual que HAProxy, KEDA, Argo y Alertmanager: Google no sube la
-    # cuota SSD del proyecto (NOT_ENOUGH_USAGE_HISTORY) y el nodo Autopilot por defecto ya la
-    # consume; los n4 usan Hyperdisk (cuota HDB-TOTAL-GB, 30 GB por nodo). Se factura por nodo.
+    # Sin etiqueta default-compute-class desde el 2026-11-10: los pods van a la clase Autopilot
+    # general (cobro por pod, nodo ek con pd-balanced). Antes iban a la ComputeClass n4-hyperdisk
+    # de cluster-deployer, que se cobraba por nodo en Compute Engine (~US$245/mes con 4 nodos).
     # Redis no vive aquí: es el compartido del cluster (cluster-deployer/redis, ns redis).
-    cloud.google.com/default-compute-class: n4-hyperdisk

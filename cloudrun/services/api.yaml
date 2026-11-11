@@ -1,0 +1,97 @@
+# Servicio Cloud Run de la API: DOS contenedores de la misma imagen en cada instancia.
+#   app      Octane + Swoole en el puerto 8000 (el único que recibe tráfico)
+#   horizon  workers de colas (correos, broadcast de bienvenida, alertas a Slack)
+# Reemplaza al Rollout `app`, al HTTPScaledObject de KEDA y al Deployment `horizon` de k8s/.
+#
+# Por qué Horizon va de sidecar y no como servicio aparte: todos los jobs de la app nacen de una
+# petición HTTP (código 2FA, restablecer contraseña, bienvenida). Si hay una petición hay una
+# instancia viva, y con ella un Horizon que procesa el job. Sin tráfico no hay instancias y no se
+# paga nada. Un Horizon siempre encendido costaría lo mismo que el pod de Kubernetes.
+#
+# cpu-throttling "false" = facturación por instancia: la CPU sigue asignada entre peticiones, que
+# es lo que Horizon necesita para trabajar cuando Octane ya respondió. La instancia se apaga sola
+# tras un máximo de 15 minutos sin peticiones (minScale 0). Con la facturación por petición
+# (el valor por defecto) Cloud Run congelaría a Horizon apenas termina la petición.
+#
+# Las líneas `# @env archivo` y `# @secrets archivo` las expande render.sh con cloudrun/env/*.
+# No aplicar este archivo directamente: sh cloudrun/deploy.sh
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ${API_SERVICE}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # 0 instancias sin tráfico; como máximo 2 (igual que el HTTPScaledObject 0-2).
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '2'
+        run.googleapis.com/cpu-throttling: 'false'
+        # CPU extra durante el arranque: `php artisan optimize` + Swoole en frío.
+        run.googleapis.com/startup-cpu-boost: 'true'
+        # Direct VPC egress: la instancia toma una IP de la subred para llegar a la VM (Postgres por
+        # el túnel y Redis). Solo los rangos privados van por la VPC; ZeptoMail, Slack y Reverb
+        # salen directo a Internet, sin Cloud NAT.
+        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${SUBNET}","tags":["${RUN_TAG}"]}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: ${RUN_SA_EMAIL}
+      # Peticiones simultáneas por instancia antes de crear la segunda. Octane tiene 2 workers y
+      # Swoole encola el resto; cada consulta cuesta ~180 ms (el Postgres está en Chile).
+      containerConcurrency: 10
+      timeoutSeconds: 300
+      containers:
+        - name: app
+          image: ${IMAGE}
+          args: ['octane']
+          ports:
+            - name: http1
+              containerPort: 8000
+          env:
+            # `auto` usaría las CPU del host, no las del contenedor: fijar siempre.
+            - name: OCTANE_WORKERS
+              value: '2'
+            - name: OCTANE_TASK_WORKERS
+              value: '1'
+            - name: OCTANE_MAX_REQUESTS
+              value: '500'
+            - name: PHP_MEMORY_LIMIT
+              value: 256M
+            # @env common.env
+            # @secrets secrets.map
+          resources:
+            limits:
+              cpu: '1'
+              memory: 1Gi
+          # /up es el health de Laravel. Hasta 2 minutos para arrancar en frío.
+          startupProbe:
+            httpGet:
+              path: /up
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+        - name: horizon
+          image: ${IMAGE}
+          args: ['horizon']
+          env:
+            - name: PHP_MEMORY_LIMIT
+              value: 256M
+            # @env common.env
+            # @secrets secrets.map
+          # master + supervisor + HORIZON_MAX_PROCESSES workers de hasta 128 MB (config/horizon.php).
+          resources:
+            limits:
+              cpu: '0.5'
+              memory: 512Mi

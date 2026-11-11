@@ -1,0 +1,90 @@
+# Servidor chisel (https://github.com/jpillora/chisel) del túnel inverso al Postgres del Mac.
+#   server --reverse   admite reverse remotes (el cliente pide que el SERVIDOR escuche un puerto)
+#   --authfile         usuarios y remotos permitidos (Secret db-tunnel-auth, users.json)
+#   CHISEL_KEY_FILE    clave fija del servidor (Secret, key) => huella estable para el cliente
+#   --keepalive 25s    pings por el WebSocket: el balanceador no lo da por muerto
+# Puertos: 8080 = HTTP/WebSocket (llega del Gateway por db-tunnel.deployer.cl); 5432 = listener
+# que abre el servidor cuando el Mac se conecta (Service postgres-local). Sin cliente conectado
+# nadie escucha en 5432 y la app recibe "connection refused": es la señal de que el Mac está
+# apagado, dormido o sin red. /health responde 200 siempre que el pod viva (no dice si hay túnel).
+# replicas 1 + Recreate: dos servidores repartirían al cliente entre pods y uno quedaría sin túnel.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-tunnel
+  namespace: deployer-api
+  labels:
+    app.kubernetes.io/name: db-tunnel
+    app.kubernetes.io/part-of: deployer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db-tunnel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-tunnel
+        app.kubernetes.io/part-of: deployer
+      # SIN `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` (quitada el 2026-11-10): en
+      # Autopilot esa anotación convierte el pod en "extended duration" y le exige un nodo propio
+      # (afinidad cloud.google.com/extended-duration-pods). Con cobro por pod ese nodo nuevo no cabe
+      # en la cuota SSD y el pod queda Pending = BD caída. Contra mudanzas queda solo el PDB.
+    spec:
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chisel
+          # Versión fija (nunca :latest). Misma versión que el cliente del Mac (~/.local/bin/chisel).
+          image: jpillora/chisel:1.13.0
+          args: ["server", "--reverse", "--port", "8080", "--keepalive", "25s", "--authfile", "/etc/chisel/users.json"]
+          env:
+            - name: CHISEL_KEY_FILE
+              valueFrom:
+                secretKeyRef:
+                  name: db-tunnel-auth
+                  key: key
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: auth
+              mountPath: /etc/chisel
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: auth
+          secret:
+            secretName: db-tunnel-auth
+            items:
+              - key: users.json
+                path: users.json

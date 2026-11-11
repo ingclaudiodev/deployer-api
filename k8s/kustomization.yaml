@@ -14,6 +14,7 @@ resources:
 - horizon
 - scheduler
 - reverb
+- db-tunnel
 images:
 - name: us-central1-docker.pkg.dev/claudio-orellana-services/deployer/deployer-api
-  newTag: 0.1.5
+  newTag: 0.1.7
