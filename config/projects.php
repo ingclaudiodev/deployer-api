@@ -5,6 +5,13 @@ $list = fn (string $key, string $default): array => array_values(array_filter(
     fn (string $value): bool => $value !== '',
 ));
 
+/** `cpu:memory_mb` pairs, the instance sizes a GPU comes with. */
+$shapes = fn (string $key, string $default): array => array_map(function (string $pair): array {
+    [$cpu, $memory] = array_pad(explode(':', $pair, 2), 2, '0');
+
+    return ['cpu' => $cpu, 'memory_mb' => (int) $memory];
+}, $list($key, $default));
+
 $regions = [];
 
 foreach ($list('PROJECT_REGIONS', 'norteamerica:us-central1,sudamerica:southamerica-west1,europa:europe-west1') as $pair) {
@@ -44,6 +51,41 @@ return [
     'max_delayed_timeout_seconds' => (int) env('PROJECT_MAX_DELAYED_TIMEOUT_SECONDS', 43200),
     'max_concurrency' => (int) env('PROJECT_MAX_CONCURRENCY', 1000),
     'max_timeout_seconds' => (int) env('PROJECT_MAX_TIMEOUT_SECONDS', 3600),
+
+    /*
+    | GPU. One per instance, and only with the instance sizes the platform accepts
+    | for it (4 vCPU and 16 GiB at least for an L4, with 8 and 32 recommended; 20 and
+    | 80 for an RTX PRO 6000): those sizes are offered with the GPU and never without
+    | it. Where each GPU exists, and whether it can have zonal redundancy, is not
+    | configured here: it comes from the price catalog (AcceleratorCatalog).
+    */
+    'gpu' => [
+        'types' => [
+            'l4' => ['vram_gb' => 24, 'shapes' => $shapes('PROJECT_GPU_L4_SHAPES', '4:16384,8:32768')],
+            'rtx_pro_6000' => ['vram_gb' => 96, 'shapes' => $shapes('PROJECT_GPU_RTX_PRO_6000_SHAPES', '20:81920')],
+        ],
+        // Copies of one project that may hold a GPU at the same time: instances of a
+        // service or of a worker pool, tasks of a job. The account's GPU quota (3 per
+        // region until it is raised) is shared by every project, so this stays small.
+        'max_instances' => (int) env('PROJECT_GPU_MAX_INSTANCES', 1),
+        // A job task that uses a GPU may run for 12 hours at most.
+        'max_task_timeout_seconds' => (int) env('PROJECT_GPU_MAX_TASK_TIMEOUT_SECONDS', 43200),
+    ],
+
+    /*
+    | Ephemeral disk: real disk an instance gets while it lives, mounted at a path,
+    | so large temporary files do not use up its memory. It is erased when the
+    | instance stops. The platform allows 1 to 100 GiB per volume, 10 GiB per
+    | instance until the quota is raised, and 100 GiB per region for the whole
+    | account: `max_total_gb` caps what one project may take of it (size x copies).
+    */
+    'ephemeral_disk' => [
+        'min_gb' => (int) env('PROJECT_DISK_MIN_GB', 1),
+        'max_gb' => (int) env('PROJECT_DISK_MAX_GB', 10),
+        'max_total_gb' => (int) env('PROJECT_DISK_MAX_TOTAL_GB', 100),
+        'default_gb' => (int) env('PROJECT_DISK_DEFAULT_GB', 10),
+        'default_path' => env('PROJECT_DISK_DEFAULT_PATH', '/mnt/disco'),
+    ],
 
     'defaults' => [
         'cpu' => env('PROJECT_DEFAULT_CPU', '1'),

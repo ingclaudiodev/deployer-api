@@ -28,6 +28,10 @@ use Illuminate\Support\Carbon;
  * @property string $region
  * @property string $cpu
  * @property int $memory_mb
+ * @property string|null $gpu GPU type each instance carries, as `config('projects.gpu.types')` names it.
+ * @property bool|null $gpu_zonal_redundancy
+ * @property int|null $ephemeral_disk_gb
+ * @property string|null $ephemeral_disk_path Where the ephemeral disk is mounted.
  * @property int|null $min_instances Services only.
  * @property int|null $max_instances Services; for a worker pool, its fixed number of instances.
  * @property int|null $concurrency Services only.
@@ -46,6 +50,7 @@ use Illuminate\Support\Carbon;
 #[Fillable([
     'name', 'kind', 'billing', 'tasks', 'max_retries', 'delayed', 'repo_provider', 'repo_full_name', 'repo_branch', 'region', 'cpu', 'memory_mb',
     'min_instances', 'max_instances', 'concurrency', 'timeout_seconds', 'port', 'public_access',
+    'gpu', 'gpu_zonal_redundancy', 'ephemeral_disk_gb', 'ephemeral_disk_path',
 ])]
 class Project extends Model
 {
@@ -97,6 +102,8 @@ class Project extends Model
             'timeout_seconds' => 'integer',
             'port' => 'integer',
             'public_access' => 'boolean',
+            'gpu_zonal_redundancy' => 'boolean',
+            'ephemeral_disk_gb' => 'integer',
         ];
     }
 

@@ -45,6 +45,14 @@ class ProjectResource extends JsonResource
                 'reintentos' => $this->max_retries,
                 'diferida' => $this->delayed,
             ] : null,
+            'gpu' => $this->gpu === null ? null : [
+                'tipo' => $this->gpu,
+                'redundanciaZonal' => (bool) $this->gpu_zonal_redundancy,
+            ],
+            'discoEfimero' => $this->ephemeral_disk_gb === null ? null : [
+                'tamanoGb' => $this->ephemeral_disk_gb,
+                'ruta' => $this->ephemeral_disk_path,
+            ],
             'accesoPublico' => $this->public_access,
             'estado' => $this->status->value,
             'url' => $this->url,

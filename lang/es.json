@@ -9,5 +9,10 @@
     "This sign-in attempt is no longer valid. Please sign in again.": "Este intento de acceso ya no es válido. Vuelve a entrar con tu contraseña.",
     "Too many wrong codes. Please sign in again.": "Demasiados códigos incorrectos. Vuelve a entrar con tu contraseña.",
     "A code was sent recently. Please wait before asking for another.": "Te enviamos un código hace poco. Espera un momento antes de pedir otro.",
-    "You have reached the limit of :max projects.": "Alcanzaste el límite de :max proyectos."
+    "You have reached the limit of :max projects.": "Alcanzaste el límite de :max proyectos.",
+    "This GPU is not available for this kind of project in this region.": "Esta GPU no está disponible para este tipo de proyecto en esta región.",
+    "Zonal redundancy is not available for this GPU here.": "La redundancia zonal no está disponible para esta GPU aquí.",
+    "A service with a GPU must be billed per instance.": "Un servicio con GPU debe cobrarse por instancia.",
+    "This size is not offered with this GPU.": "Este tamaño no se ofrece con esta GPU.",
+    "The disk of every copy adds up to more than :max GiB.": "El disco de todas las copias suma más de :max GiB."
 }
