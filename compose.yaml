@@ -1,7 +1,17 @@
 # Entorno local de deployer-api: Octane (Swoole) + Horizon + scheduler + Reverb + Redis.
 #
-#   docker compose up -d --build
-#   docker compose exec app php artisan octane:reload   # tras cambiar código PHP
+#   docker compose up -d            # arranca y ESCUCHA los cambios: no hay que reiniciar nada
+#   docker compose up -d --build    # solo si cambia docker/Dockerfile o una extensión de PHP
+#
+# El código está montado desde el anfitrión y cada proceso se recarga solo al guardar un PHP:
+#   app        Octane con --watch (OCTANE_WATCH)
+#   horizon    horizon:listen, reinicia los workers (HORIZON_WATCH)
+#   scheduler  schedule:work lanza un proceso nuevo en cada tarea: siempre corre el código actual
+#   reverb     no se recarga solo: `docker compose restart reverb` si cambia algo de broadcasting
+# Los dos vigilantes usan chokidar (node_modules, `npm install`). Para apagarlos:
+#   OCTANE_WATCH=false HORIZON_WATCH=false docker compose up -d
+# Las migraciones no corren solas: `docker compose exec app php artisan migrate`
+# (o RUN_MIGRATIONS=true para que el entrypoint las aplique en cada arranque).
 #
 # La base de datos NO corre en compose: la app se conecta con los DB_* del .env, salvo DB_HOST,
 # que aquí se fija en host.docker.internal para llegar al Postgres de la máquina anfitriona
@@ -25,6 +35,8 @@ x-app: &app
     REVERB_HOST: reverb
     REVERB_SCHEME: http
     PHP_OPCACHE_VALIDATE_TIMESTAMPS: 1
+    OCTANE_WATCH: ${OCTANE_WATCH:-true}
+    HORIZON_WATCH: ${HORIZON_WATCH:-true}
   volumes:
     - .:/var/www/html
   extra_hosts:

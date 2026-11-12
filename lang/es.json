@@ -8,5 +8,6 @@
     "The code is not valid.": "El código no es válido.",
     "This sign-in attempt is no longer valid. Please sign in again.": "Este intento de acceso ya no es válido. Vuelve a entrar con tu contraseña.",
     "Too many wrong codes. Please sign in again.": "Demasiados códigos incorrectos. Vuelve a entrar con tu contraseña.",
-    "A code was sent recently. Please wait before asking for another.": "Te enviamos un código hace poco. Espera un momento antes de pedir otro."
+    "A code was sent recently. Please wait before asking for another.": "Te enviamos un código hace poco. Espera un momento antes de pedir otro.",
+    "You have reached the limit of :max projects.": "Alcanzaste el límite de :max proyectos."
 }

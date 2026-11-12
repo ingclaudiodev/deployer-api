@@ -33,6 +33,7 @@ use Laravel\Passport\HasApiTokens;
  * @property-read Role $role
  * @property-read Collection<int, TwoFactorChallenge> $twoFactorChallenges
  * @property-read Collection<int, TrustedDevice> $trustedDevices
+ * @property-read Collection<int, Project> $projects
  */
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
@@ -113,6 +114,16 @@ class User extends Authenticatable implements MustVerifyEmail, OAuthenticatable
     public function trustedDevices(): HasMany
     {
         return $this->hasMany(TrustedDevice::class);
+    }
+
+    /**
+     * Repositories this user deploys as services.
+     *
+     * @return HasMany<Project, $this>
+     */
+    public function projects(): HasMany
+    {
+        return $this->hasMany(Project::class);
     }
 
     /**

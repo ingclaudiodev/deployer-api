@@ -9,7 +9,8 @@
 #
 # Variables que lo controlan (todas opcionales):
 #   PORT / OCTANE_PORT, OCTANE_WORKERS, OCTANE_TASK_WORKERS, OCTANE_MAX_REQUESTS,
-#   OCTANE_WATCH=true (requiere chokidar en node_modules), RUN_MIGRATIONS=true,
+#   OCTANE_WATCH=true y HORIZON_WATCH=true (recarga al cambiar un PHP; requieren chokidar en
+#   node_modules), RUN_MIGRATIONS=true,
 #   REVERB_SERVER_HOST / REVERB_SERVER_PORT, REVERB_DEBUG=true (loguea cada mensaje).
 set -eu
 
@@ -60,7 +61,11 @@ case "${1:-octane}" in
         fi
         ;;
     horizon)
-        set -- php artisan horizon
+        if [ "${HORIZON_WATCH:-false}" = "true" ]; then
+            set -- php artisan horizon:listen
+        else
+            set -- php artisan horizon
+        fi
         ;;
     scheduler)
         set -- php artisan schedule:work

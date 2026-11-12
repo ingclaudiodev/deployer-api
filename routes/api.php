@@ -8,6 +8,13 @@ use App\Http\Controllers\Api\Auth\RegisterController;
 use App\Http\Controllers\Api\Auth\ResetPasswordController;
 use App\Http\Controllers\Api\Auth\TwoFactorResendController;
 use App\Http\Controllers\Api\Auth\TwoFactorVerifyController;
+use App\Http\Controllers\Api\Pricing\IndexController as PricingIndexController;
+use App\Http\Controllers\Api\Projects\DestroyController;
+use App\Http\Controllers\Api\Projects\IndexController;
+use App\Http\Controllers\Api\Projects\OptionsController;
+use App\Http\Controllers\Api\Projects\ShowController;
+use App\Http\Controllers\Api\Projects\StoreController;
+use App\Http\Controllers\Api\Projects\UpdateController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->name('auth.')->group(function (): void {
@@ -29,3 +36,17 @@ Route::prefix('auth')->name('auth.')->group(function (): void {
         Route::post('logout', LogoutController::class)->name('logout');
     });
 });
+
+// Projects of the signed-in user. `{project}` resolves only among their own
+// (AppServiceProvider), so somebody else's id answers 404 like one that does not exist.
+Route::middleware('auth:api')->prefix('projects')->name('projects.')->group(function (): void {
+    Route::get('/', IndexController::class)->name('index');
+    Route::post('/', StoreController::class)->name('store');
+    Route::get('options', OptionsController::class)->name('options');
+    Route::get('{project}', ShowController::class)->name('show')->whereNumber('project');
+    Route::patch('{project}', UpdateController::class)->name('update')->whereNumber('project');
+    Route::delete('{project}', DestroyController::class)->name('destroy')->whereNumber('project');
+});
+
+// Public price list: the landing shows it to visitors without a session.
+Route::get('pricing', PricingIndexController::class)->name('pricing.index');

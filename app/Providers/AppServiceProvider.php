@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\Project;
+use App\Models\User;
 use App\Services\Ai\Contracts\GenerativeModel;
 use App\Services\Ai\VertexAiGenerativeModel;
 use App\Services\CloudArchitectAgent;
@@ -10,6 +12,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -48,6 +51,22 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+        $this->bindOwnedProjects();
+    }
+
+    /**
+     * `{project}` in a route is always one of the signed-in user's projects. Bound
+     * here and not in the routes file, which is skipped once routes are cached.
+     */
+    protected function bindOwnedProjects(): void
+    {
+        Route::bind('project', function (string $id): Project {
+            $user = request()->user();
+
+            abort_unless($user instanceof User, 404);
+
+            return $user->projects()->findOrFail($id);
+        });
     }
 
     /**
