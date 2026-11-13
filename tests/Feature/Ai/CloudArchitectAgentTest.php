@@ -13,7 +13,7 @@ test('it returns the analysis of the model together with what the call consumed'
     expect($analysis['stack']['framework'])->toBe('Express')
         ->and($analysis['container']['port'])->toBe(3000)
         ->and($analysis['services'][1]['kind'])->toBe('job')
-        ->and(array_column($analysis['files'], 'path'))->toContain('Dockerfile', 'cloudrun/services/orders-api.yaml')
+        ->and(array_column($analysis['files'], 'path'))->toContain('Dockerfile', 'deployer/services/orders-api.yaml')
         ->and($analysis['env_vars'][0])->toBe(['name' => 'DATABASE_URL', 'description' => 'Conexión a Postgres', 'secret' => true])
         ->and($analysis['usage'])->toBe(['model' => 'gemini-test', 'input_tokens' => 900, 'output_tokens' => 350, 'thinking_tokens' => 0]);
 });
@@ -63,7 +63,7 @@ test('it rejects an analysis Cloud Run would not accept', function (array $overr
     'unknown confidence' => [['confidence' => 'absolute']],
     'env var name that is not an identifier' => [['env_vars' => [['name' => 'FOO; rm -rf /']]]],
     'file outside the deployment folders' => [['files' => [['path' => 'src/server.js']]]],
-    'file that climbs out of the repository' => [['files' => [['path' => 'cloudrun/../../.ssh/authorized_keys']]]],
+    'file that climbs out of the repository' => [['files' => [['path' => 'deployer/../../.ssh/authorized_keys']]]],
     'no Dockerfile for a repository without one' => [['files' => [['path' => '.dockerignore']]]],
     'service without its manifest' => [['services' => [['name' => 'worker']]]],
 ])->throws(InvalidAnalysisException::class, 'expected structure');
@@ -79,3 +79,35 @@ test('without a project the model refuses before calling Google', function (): v
 
     app(GenerativeModel::class)->generateJson('system', 'prompt', ['type' => 'OBJECT']);
 })->throws(GenerativeModelException::class, 'VERTEX_AI_PROJECT');
+
+test('it rejects a process that does not come from the inventory of components', function (array $overrides): void {
+    fakeGenerativeModel(analysisJson($overrides));
+
+    app(CloudArchitectAgent::class)->analyze(['repository' => 'acme/orders-api']);
+})->with([
+    'service of a component nobody listed' => [['services' => [['component' => 'fantasma']]]],
+    'job run as a service' => [['services' => [1 => ['kind' => 'service']]]],
+    'runtime component left without a process' => [['components' => [2 => ['runs_as' => 'service']]]],
+])->throws(InvalidAnalysisException::class);
+
+test('it rejects a deployment that does not aim at the cloud project the platform gave it', function (array $target): void {
+    fakeGenerativeModel(analysisJson());
+
+    app(CloudArchitectAgent::class)->analyze([
+        'repository' => 'acme/orders-api',
+        'target' => ['organization_id' => '1', 'kind' => 'servicio', 'limits' => [], ...$target],
+    ]);
+})->with([
+    'another project' => [['project_id' => 'dpl-2-otro', 'region' => 'us-central1']],
+    'another region' => [['project_id' => 'dpl-1-orders-api', 'region' => 'europe-west1']],
+])->throws(InvalidAnalysisException::class, 'target');
+
+test('it sends the target of the platform to the model and accepts a deployment that uses it', function (): void {
+    $model = fakeGenerativeModel(analysisJson());
+    $target = ['organization_id' => '274265040353', 'project_id' => 'dpl-1-orders-api', 'region' => 'us-central1', 'kind' => 'servicio', 'limits' => ['cpu' => '1']];
+
+    app(CloudArchitectAgent::class)->analyze(['repository' => 'acme/orders-api', 'target' => $target]);
+
+    expect(json_decode((string) $model->prompt, true)['target'])->toBe($target);
+});
+

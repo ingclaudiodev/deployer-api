@@ -1,8 +1,12 @@
 <?php
 
+use App\Enums\ProjectFileAction;
+use App\Models\Project;
 use App\Services\Ai\Contracts\GenerativeModel;
 use App\Services\Ai\GeneratedJson;
 use App\Services\Ai\GeneratedText;
+use App\Services\Projects\Storage\Contracts\ProjectFileStore;
+use App\Services\Projects\Storage\ProjectFilePath;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Client;
 use Tests\TestCase;
@@ -101,6 +105,49 @@ function fakeGenerativeModel(string|Throwable $answer): GenerativeModel
 }
 
 /**
+ * Stands in for the bucket: keeps the objects in memory under the names the real
+ * store would give them (`$objects`), so a test can read what was written.
+ */
+function fakeProjectFileStore(): ProjectFileStore
+{
+    $store = new class implements ProjectFileStore
+    {
+        /** @var array<string, string> */
+        public array $objects = [];
+
+        public function put(Project $project, ProjectFileAction $action, string $path, string $contents): string
+        {
+            $this->objects[ProjectFilePath::object($project, $action, $path)] = $contents;
+
+            return '1';
+        }
+
+        public function get(Project $project, ProjectFileAction $action, string $path): ?string
+        {
+            return $this->objects[ProjectFilePath::object($project, $action, $path)] ?? null;
+        }
+
+        public function paths(Project $project, ProjectFileAction $action): array
+        {
+            $prefix = ProjectFilePath::prefix($project, $action);
+            $paths = [];
+
+            foreach (array_keys($this->objects) as $name) {
+                if (str_starts_with($name, $prefix)) {
+                    $paths[] = substr($name, strlen($prefix));
+                }
+            }
+
+            return $paths;
+        }
+    };
+
+    app()->instance(ProjectFileStore::class, $store);
+
+    return $store;
+}
+
+/**
  * @param  array<string, mixed>  $overrides
  */
 function analysisJson(array $overrides = []): string
@@ -109,16 +156,22 @@ function analysisJson(array $overrides = []): string
         'summary' => 'API Express con Postgres y Redis.',
         'stack' => ['language' => 'JavaScript', 'framework' => 'Express', 'runtime_version' => '22', 'package_manager' => 'npm'],
         'container' => ['has_dockerfile' => false, 'port' => 3000, 'start_command' => 'node src/server.js'],
+        'components' => [
+            ['name' => 'api', 'path' => '.', 'role' => 'API HTTP', 'runs_as' => 'service', 'evidence' => ['package.json', 'src/server.js']],
+            ['name' => 'migraciones', 'path' => 'prisma', 'role' => 'Migraciones de la base', 'runs_as' => 'job', 'evidence' => ['prisma/schema.prisma']],
+            ['name' => 'tests', 'path' => 'test', 'role' => 'Pruebas', 'runs_as' => 'none', 'evidence' => ['test/api.test.js']],
+        ],
         'services' => [
-            ['name' => 'orders-api', 'kind' => 'service', 'purpose' => 'API HTTP', 'command' => 'node src/server.js', 'public' => true, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 3, 'concurrency' => 80, 'timeout_seconds' => 60, 'cpu_always_allocated' => false],
-            ['name' => 'migrate', 'kind' => 'job', 'purpose' => 'Migraciones', 'command' => 'npx prisma migrate deploy', 'public' => false, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 1, 'concurrency' => 1, 'timeout_seconds' => 600, 'cpu_always_allocated' => false],
+            ['name' => 'orders-api', 'component' => 'api', 'kind' => 'service', 'purpose' => 'API HTTP', 'command' => 'node src/server.js', 'public' => true, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 3, 'concurrency' => 80, 'timeout_seconds' => 60, 'cpu_always_allocated' => false],
+            ['name' => 'migrate', 'component' => 'migraciones', 'kind' => 'job', 'purpose' => 'Migraciones', 'command' => 'npx prisma migrate deploy', 'public' => false, 'cpu' => '1', 'memory' => '512Mi', 'min_instances' => 0, 'max_instances' => 1, 'concurrency' => 1, 'timeout_seconds' => 600, 'cpu_always_allocated' => false],
         ],
         'files' => [
             ['path' => 'Dockerfile', 'content' => "FROM node:22-alpine\nUSER node\nCMD [\"node\", \"src/server.js\"]"],
-            ['path' => 'cloudrun/config.sh', 'content' => 'PROJECT=${PROJECT:-acme}'],
-            ['path' => 'cloudrun/deploy.sh', 'content' => '#!/bin/sh'],
-            ['path' => 'cloudrun/services/orders-api.yaml', 'content' => 'kind: Service'],
-            ['path' => 'cloudrun/jobs/migrate.yaml', 'content' => 'kind: Job'],
+            ['path' => 'deployer/config.sh', 'content' => "PROJECT=\${PROJECT:-dpl-1-orders-api}\nREGION=\${REGION:-us-central1}"],
+            ['path' => 'deployer/setup.sh', 'content' => '#!/bin/sh'],
+            ['path' => 'deployer/deploy.sh', 'content' => '#!/bin/sh'],
+            ['path' => 'deployer/services/orders-api.yaml', 'content' => 'kind: Service'],
+            ['path' => 'deployer/jobs/migrate.yaml', 'content' => 'kind: Job'],
         ],
         'env_vars' => [
             ['name' => 'DATABASE_URL', 'description' => 'Conexión a Postgres', 'secret' => true],

@@ -59,4 +59,47 @@ return [
         'max_manifest_characters' => (int) env('CLOUD_ARCHITECT_MAX_MANIFEST_CHARACTERS', 6000),
     ],
 
+    /*
+    | OAuth applications that connect a user's GitHub or GitLab account, so
+    | Deployer can read their repositories and renew the tokens it holds.
+    */
+    'github' => [
+        'client_id' => env('GITHUB_CLIENT_ID'),
+        'client_secret' => env('GITHUB_CLIENT_SECRET'),
+    ],
+
+    'gitlab' => [
+        'client_id' => env('GITLAB_CLIENT_ID'),
+        'client_secret' => env('GITLAB_CLIENT_SECRET'),
+        // Base URL; change it for a self-managed GitLab.
+        'url' => env('GITLAB_URL', 'https://gitlab.com'),
+    ],
+
+    'repositories' => [
+        // Page of the SPA (under FRONTEND_URL) the OAuth callback returns the browser to.
+        'frontend_path' => env('REPOSITORIES_FRONTEND_PATH', '/app/proyectos/nuevo'),
+    ],
+
+    /*
+    | Bucket that keeps what Deployer writes for each project (analysis, deployment
+    | files). Credentials are Application Default Credentials, as with Vertex AI.
+    */
+    'project_storage' => [
+        'project' => env('PROJECT_STORAGE_PROJECT'),
+        'bucket' => env('PROJECT_STORAGE_BUCKET'),
+    ],
+
+    /*
+    | Where deployments run: one Cloud Build per deployment in Deployer's own
+    | project, as a service account dedicated to them (the only identity allowed
+    | to create cloud projects in the organization). See config/projects.php,
+    | `platform`, for where the projects of the users end up.
+    */
+    'deployments' => [
+        'project' => env('DEPLOYMENT_PROJECT'),
+        'region' => env('DEPLOYMENT_REGION', 'us-central1'),
+        'service_account' => env('DEPLOYMENT_SERVICE_ACCOUNT'),
+        'timeout' => (int) env('DEPLOYMENT_TIMEOUT', 2400),
+    ],
+
 ];

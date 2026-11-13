@@ -7,6 +7,15 @@ use App\Models\User;
 use App\Services\Ai\Contracts\GenerativeModel;
 use App\Services\Ai\VertexAiGenerativeModel;
 use App\Services\CloudArchitectAgent;
+use App\Services\Projects\Deployment\CloudBuildDeploymentRunner;
+use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
+use App\Services\Projects\Storage\Contracts\ProjectFileStore;
+use App\Services\Projects\Storage\GcsProjectFileStore;
+use App\Services\Repositories\Adapters\GitHubTokenAdapter;
+use App\Services\Repositories\Adapters\GitLabTokenAdapter;
+use App\Services\Repositories\Hosts\GitHubHost;
+use App\Services\Repositories\RefreshTokenService;
+use App\Services\Repositories\RepositoryConnector;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -42,6 +51,30 @@ class AppServiceProvider extends ServiceProvider
             model: $app->make(GenerativeModel::class),
             maxFiles: (int) config('services.cloud_architect.max_files'),
             maxManifestCharacters: (int) config('services.cloud_architect.max_manifest_characters'),
+        ));
+
+        // One adapter per repository host; a new host is one more line here.
+        $this->app->singleton(RefreshTokenService::class, fn (Application $app): RefreshTokenService => new RefreshTokenService([
+            $app->make(GitHubTokenAdapter::class),
+            $app->make(GitLabTokenAdapter::class),
+        ]));
+
+        // Hosts whose accounts can be connected. GitLab joins when its host is written.
+        $this->app->singleton(RepositoryConnector::class, fn (Application $app): RepositoryConnector => new RepositoryConnector(
+            hosts: [$app->make(GitHubHost::class)],
+            tokens: $app->make(RefreshTokenService::class),
+        ));
+
+        $this->app->singleton(ProjectFileStore::class, fn (): ProjectFileStore => new GcsProjectFileStore(
+            project: config('services.project_storage.project'),
+            bucket: config('services.project_storage.bucket'),
+        ));
+
+        $this->app->singleton(DeploymentRunner::class, fn (): DeploymentRunner => new CloudBuildDeploymentRunner(
+            project: config('services.deployments.project'),
+            region: (string) config('services.deployments.region'),
+            serviceAccount: config('services.deployments.service_account'),
+            buildTimeoutSeconds: (int) config('services.deployments.timeout'),
         ));
     }
 

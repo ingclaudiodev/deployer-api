@@ -27,6 +27,19 @@ return [
     | live in one place.
     */
 
+    /*
+    | Where the projects of the users run: each one gets a cloud project of its own
+    | inside the organization, so nothing a project deploys can reach another one
+    | or Deployer itself. The billing account is only named here; it is not a secret,
+    | but it never goes to the client.
+    */
+    'platform' => [
+        'organization_id' => env('DEPLOYER_ORGANIZATION_ID'),
+        'billing_account' => env('DEPLOYER_BILLING_ACCOUNT'),
+        // Start of every cloud project id. Ids are global: keep it distinctive.
+        'project_prefix' => env('DEPLOYER_PROJECT_PREFIX', 'dpl'),
+    ],
+
     // Projects one account may hold.
     'max_per_user' => (int) env('PROJECT_MAX_PER_USER', 20),
 

@@ -2,9 +2,11 @@
 
 use App\Enums\ProjectStatus;
 use App\Models\Project;
+use App\Models\RepositoryConnection;
 use App\Models\User;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
 
 /**
@@ -627,4 +629,22 @@ test('the options say where each gpu can be had and how much disk', function ():
             'totalMaxGb' => 100,
             'porDefecto' => ['tamanoGb' => 10, 'ruta' => '/mnt/disco'],
         ]);
+});
+
+test('with an account connected, a project needs a repository that account reaches', function (): void {
+    $user = User::factory()->create();
+    RepositoryConnection::factory()->for($user)->create();
+    Passport::actingAs($user);
+    Http::fake([
+        'https://api.github.com/repos/acme/orders-api' => Http::response(['full_name' => 'acme/orders-api']),
+        'https://api.github.com/repos/acme/secret' => Http::response(['message' => 'Not Found'], 404),
+    ]);
+
+    $this->postJson(route('projects.store'), projectPayload(['nombre' => 'visible']))->assertCreated();
+
+    $this->postJson(route('projects.store'), projectPayload(['nombre' => 'hidden', 'repositorio' => ['nombreCompleto' => 'acme/secret']]))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('repositorio.nombreCompleto');
+
+    expect($user->projects()->pluck('name')->all())->toBe(['visible']);
 });
