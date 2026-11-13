@@ -51,6 +51,11 @@ function fakeDeploymentRunner(DeploymentState $state = DeploymentState::Running)
         {
             return $this->state;
         }
+
+        public function failure(string $runId): string
+        {
+            return "Build {$runId} ended as FAILURE. The script exited with code 1.";
+        }
     };
 
     app()->instance(DeploymentRunner::class, $runner);
@@ -223,8 +228,30 @@ test('a deployment that failed leaves the project failed', function (): void {
 
     (new WatchProjectDeployment($project))->handle(app(ProjectDeployer::class));
 
-    expect($project->fresh()->status)->toBe(ProjectStatus::Failed);
+    expect($project->fresh())
+        ->status->toBe(ProjectStatus::Failed)
+        ->failure_reason->toBe('Build build-1 ended as FAILURE. The script exited with code 1.');
     Queue::assertNotPushed(WatchProjectDeployment::class);
+});
+
+test('the owner reads why the project failed, and a new approval clears it', function (): void {
+    Queue::fake();
+    fakeProjectFileStore();
+    $project = analysedProject();
+    Passport::actingAs($project->user);
+
+    (new DeployProject($project))->failed(new RuntimeException('no billing account'));
+
+    $this->getJson(route('projects.show', $project))
+        ->assertOk()
+        ->assertJsonPath('estado', 'fallido')
+        ->assertJsonPath('motivoFallo', 'The deployment could not start: no billing account');
+
+    $project->forceFill(['status' => ProjectStatus::PendingApproval])->save();
+
+    $this->postJson(route('projects.approval.store', $project))
+        ->assertOk()
+        ->assertJsonPath('motivoFallo', null);
 });
 
 test('the watcher of an approval that was replaced stops', function (): void {

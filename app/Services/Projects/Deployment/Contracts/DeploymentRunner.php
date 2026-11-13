@@ -28,4 +28,11 @@ interface DeploymentRunner
      * @throws DeploymentException
      */
     public function state(string $runId): DeploymentState;
+
+    /**
+     * What the runner says about why a run failed, for a person to read.
+     *
+     * @throws DeploymentException
+     */
+    public function failure(string $runId): string;
 }

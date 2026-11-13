@@ -106,7 +106,7 @@ class ProjectAnalyzer
             'analyzed_at' => now()->toIso8601String(),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
-        $project->forceFill(['status' => ProjectStatus::PendingApproval])->save();
+        $project->forceFill(['status' => ProjectStatus::PendingApproval, 'failure_reason' => null])->save();
 
         return $analysis;
     }

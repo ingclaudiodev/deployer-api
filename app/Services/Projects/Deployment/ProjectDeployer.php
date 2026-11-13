@@ -83,6 +83,7 @@ class ProjectDeployer
             'approved_by_id' => $user->id,
             'approved_version' => $version,
             'deployment_build_id' => null,
+            'failure_reason' => null,
         ])->save();
 
         return $project;
@@ -134,9 +135,11 @@ class ProjectDeployer
             return true;
         }
 
-        $project->forceFill($state === DeploymentState::Succeeded
-            ? ['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project)]
-            : ['status' => ProjectStatus::Failed])->save();
+        if ($state === DeploymentState::Succeeded) {
+            $project->forceFill(['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project), 'failure_reason' => null])->save();
+        } else {
+            $project->markFailed($this->runner->failure((string) $project->deployment_build_id));
+        }
 
         return false;
     }

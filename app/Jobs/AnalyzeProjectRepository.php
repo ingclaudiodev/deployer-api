@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Enums\ProjectStatus;
 use App\Models\Project;
 use App\Services\Projects\ProjectAnalyzer;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -46,7 +45,7 @@ class AnalyzeProjectRepository implements ShouldBeUnique, ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
-        $this->project->forceFill(['status' => ProjectStatus::Failed])->save();
+        $this->project->markFailed('The analysis failed: '.($exception?->getMessage() ?? 'the job was lost.'));
     }
 
     /**

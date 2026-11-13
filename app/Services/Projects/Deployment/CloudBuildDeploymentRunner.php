@@ -79,6 +79,21 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
         };
     }
 
+    public function failure(string $runId): string
+    {
+        $build = $this->send('get', "/builds/{$runId}");
+        $step = collect($build['steps'] ?? [])->first(fn (mixed $step): bool => is_array($step) && ($step['status'] ?? null) === 'FAILURE');
+
+        return implode(' ', array_filter([
+            'Build '.$runId.' ended as '.($build['status'] ?? 'UNKNOWN').'.',
+            is_string($build['statusDetail'] ?? null) ? $build['statusDetail'] : null,
+            is_string($build['failureInfo']['detail'] ?? null) ? $build['failureInfo']['detail'] : null,
+            is_array($step) && isset($step['exitCode']) ? "The script exited with code {$step['exitCode']}." : null,
+            // The output of the script is in the logs of the build, not in this answer.
+            is_string($build['logUrl'] ?? null) ? 'Logs: '.$build['logUrl'] : null,
+        ]));
+    }
+
     /**
      * @param  array<string, mixed>  $body
      * @return array<string, mixed>

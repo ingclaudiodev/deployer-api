@@ -48,7 +48,7 @@ class WatchProjectDeployment implements ShouldQueue
         }
 
         if ($this->look >= self::MAX_LOOKS) {
-            $project->forceFill(['status' => ProjectStatus::Failed])->save();
+            $project->markFailed('The deployment did not finish in the time allowed.');
 
             return;
         }

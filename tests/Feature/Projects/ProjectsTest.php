@@ -75,6 +75,7 @@ test('a project is created not deployed, in the shape the client reads', functio
         'id' => $project->id,
         'estado' => 'sin_despliegue',
         'url' => null,
+        'motivoFallo' => null,
         'creadoEn' => $project->created_at->toIso8601String(),
         'actualizadoEn' => $project->updated_at->toIso8601String(),
     ]);

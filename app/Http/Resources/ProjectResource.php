@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\ProjectKind;
+use App\Enums\ProjectStatus;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -56,6 +57,8 @@ class ProjectResource extends JsonResource
             'accesoPublico' => $this->public_access,
             'estado' => $this->status->value,
             'url' => $this->url,
+            // Only a failed project has a reason to show; the text of an old failure is not sent.
+            'motivoFallo' => $this->status === ProjectStatus::Failed ? $this->failure_reason : null,
             'creadoEn' => $this->created_at->toIso8601String(),
             'actualizadoEn' => $this->updated_at->toIso8601String(),
         ];
