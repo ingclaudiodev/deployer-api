@@ -234,7 +234,7 @@ test('a deployment that failed leaves the project failed', function (): void {
     Queue::assertNotPushed(WatchProjectDeployment::class);
 });
 
-test('the owner reads why the project failed, and a new approval clears it', function (): void {
+test('the owner reads why the project failed and can approve again, which clears it', function (): void {
     Queue::fake();
     fakeProjectFileStore();
     $project = analysedProject();
@@ -247,10 +247,10 @@ test('the owner reads why the project failed, and a new approval clears it', fun
         ->assertJsonPath('estado', 'fallido')
         ->assertJsonPath('motivoFallo', 'The deployment could not start: no billing account');
 
-    $project->forceFill(['status' => ProjectStatus::PendingApproval])->save();
-
+    // No new analysis is needed to try again: the one on screen is signed once more.
     $this->postJson(route('projects.approval.store', $project))
         ->assertOk()
+        ->assertJsonPath('estado', 'construyendo')
         ->assertJsonPath('motivoFallo', null);
 });
 

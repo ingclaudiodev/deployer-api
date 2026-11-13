@@ -55,7 +55,9 @@ class ProjectDeployer
      */
     public function approve(Project $project, User $user): Project
     {
-        if ($project->status !== ProjectStatus::PendingApproval) {
+        // A failed project can be signed again: the analysis on screen is still there, and
+        // most failures are of the deployment, not of what was analysed.
+        if (! in_array($project->status, [ProjectStatus::PendingApproval, ProjectStatus::Failed], true)) {
             throw DeploymentException::notApprovable('it has no analysis waiting for approval.');
         }
 
