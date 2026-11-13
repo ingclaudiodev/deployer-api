@@ -10,6 +10,7 @@ use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
 use App\Services\Projects\Deployment\DeploymentState;
 use App\Services\Projects\Deployment\ProjectDeployer;
 use App\Events\Projects\ProjectProgressed;
+use App\Exceptions\Projects\DeploymentException;
 use App\Services\Projects\ProjectAnalyzer;
 use App\Services\Projects\ProjectProgress;
 use Illuminate\Support\Facades\Event;
@@ -58,8 +59,14 @@ function fakeDeploymentRunner(DeploymentState $state = DeploymentState::Running)
         /** @var list<string> */
         public array $lines = [];
 
+        public bool $unreadable = false;
+
         public function output(string $runId, ?string $cursor): array
         {
+            if ($this->unreadable) {
+                throw DeploymentException::unexpectedAnswer(403, 'Permission logging.logEntries.list denied');
+            }
+
             // Like the real one: only what is new since the cursor.
             return ['lines' => $cursor === null ? $this->lines : [], 'cursor' => 'seen'];
         }
@@ -344,5 +351,60 @@ test('nobody reads the progress of the project of somebody else', function (): v
     Passport::actingAs(User::factory()->create());
 
     $this->getJson(route('projects.progress', $project))->assertNotFound();
+});
+
+test('a deployment whose output cannot be read says so once and is still followed', function (): void {
+    Queue::fake();
+    fakeProjectFileStore();
+    $runner = fakeDeploymentRunner(DeploymentState::Running);
+    $runner->unreadable = true;
+    $project = analysedProject();
+    $deployer = app(ProjectDeployer::class);
+    $deployer->approve($project, $project->user);
+    $project->forceFill(['deployment_build_id' => 'build-1'])->save();
+
+    (new WatchProjectDeployment($project))->handle($deployer);
+    (new WatchProjectDeployment($project))->handle($deployer);
+
+    $lines = collect(app(ProjectProgress::class)->entries($project))->where('tipo', 'log')->pluck('mensaje');
+
+    expect($lines)->toHaveCount(1)
+        ->and($lines->first())->toContain('No se puede leer la salida del build', 'logging.logEntries.list')
+        ->and($project->fresh()->status)->toBe(ProjectStatus::Building);
+    Queue::assertPushed(WatchProjectDeployment::class, 2);
+});
+
+test('asking for the progress moves a running deployment forward, without waiting for the queue', function (): void {
+    Queue::fake();
+    fakeProjectFileStore();
+    $runner = fakeDeploymentRunner(DeploymentState::Failed);
+    $runner->lines = ['ERROR: (gcloud.builds.submit) INVALID_ARGUMENT'];
+    $project = analysedProject();
+    app(ProjectDeployer::class)->approve($project, $project->user);
+    $project->forceFill(['deployment_build_id' => 'build-1'])->save();
+    Passport::actingAs($project->user);
+
+    $response = $this->getJson(route('projects.progress', $project))->assertOk()->assertJsonPath('estado', 'fallido');
+
+    expect(collect($response->json('entradas'))->pluck('tipo')->all())->toBe(['paso', 'log', 'error'])
+        ->and($project->fresh()->failure_reason)->toContain('build-1');
+});
+
+test('looks that keep failing end the deployment as failed instead of leaving it building', function (): void {
+    Queue::fake();
+    fakeProjectFileStore();
+    $project = Project::factory()->create(['deployment_build_id' => 'build-1']);
+    $project->forceFill(['status' => ProjectStatus::Building])->save();
+
+    (new WatchProjectDeployment($project, 'build-1', 3, 0))->failed(new RuntimeException('boom'));
+
+    expect($project->fresh()->status)->toBe(ProjectStatus::Building);
+    Queue::assertPushed(WatchProjectDeployment::class, fn (WatchProjectDeployment $job): bool => $job->failedLooks === 1 && $job->look === 4);
+
+    (new WatchProjectDeployment($project, 'build-1', 8, 5))->failed(new RuntimeException('boom'));
+
+    expect($project->fresh())
+        ->status->toBe(ProjectStatus::Failed)
+        ->failure_reason->toBe('Deployer could not follow the deployment: boom');
 });
 

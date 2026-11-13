@@ -24,6 +24,9 @@ class WatchProjectDeployment implements ShouldQueue
     /** Looks before giving the deployment up for lost: a little over the runner's own timeout. */
     private const int MAX_LOOKS = 300;
 
+    /** Looks in a row that may fail before the deployment is given up. */
+    private const int MAX_FAILED_LOOKS = 6;
+
     public int $tries = 1;
 
     public int $timeout = 60;
@@ -32,6 +35,7 @@ class WatchProjectDeployment implements ShouldQueue
         public Project $project,
         public string $buildId = '',
         public int $look = 1,
+        public int $failedLooks = 0,
     ) {}
 
     public function handle(ProjectDeployer $deployer): void
@@ -59,13 +63,30 @@ class WatchProjectDeployment implements ShouldQueue
     }
 
     /**
-     * A look that could not be made (the runner did not answer) must not leave
-     * the project "building" forever: the next look is still queued.
+     * A look that could not be made (the runner did not answer, a bug in the
+     * look itself) is tried again a few times. After that the project is told
+     * failed, with the reason: "building" forever is the one thing it must not be.
      */
     public function failed(?Throwable $exception): void
     {
-        if ($this->look < self::MAX_LOOKS) {
-            self::dispatch($this->project, $this->buildId, $this->look + 1)->delay(now()->addSeconds(self::INTERVAL_SECONDS));
+        $reason = $exception?->getMessage() ?? 'the job was lost.';
+        $progress = app(ProjectProgress::class);
+
+        if ($this->failedLooks + 1 < self::MAX_FAILED_LOOKS && $this->look < self::MAX_LOOKS) {
+            if ($this->failedLooks === 0) {
+                $progress->output($this->project, ProjectProgress::DEPLOYMENT, ["No se pudo consultar el despliegue; se reintenta. Motivo: {$reason}"]);
+            }
+
+            self::dispatch($this->project, $this->buildId, $this->look + 1, $this->failedLooks + 1)->delay(now()->addSeconds(self::INTERVAL_SECONDS));
+
+            return;
+        }
+
+        $project = $this->project->refresh();
+
+        if ($project->status === ProjectStatus::Building) {
+            $project->markFailed("Deployer could not follow the deployment: {$reason}");
+            $progress->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
         }
     }
 

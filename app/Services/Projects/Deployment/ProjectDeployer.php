@@ -111,6 +111,7 @@ class ProjectDeployer
         ])->save();
 
         Cache::forget($this->cursorKey($project));
+        Cache::forget($this->cursorKey($project).':unreadable');
         $this->progress->begin($project, ProjectProgress::DEPLOYMENT, sprintf(
             'Aprobado por %s. %d archivos firmados y congelados (versión %s). Despliegue en cola…',
             $user->name ?: $user->email,
@@ -165,23 +166,41 @@ class ProjectDeployer
      */
     public function follow(Project $project): bool
     {
-        $this->relayOutput($project);
+        // The queue and the screen both look at a running deployment. One at a time:
+        // two looks at once would relay the same output twice.
+        $lock = Cache::lock("project-follow:{$project->id}", 60);
 
-        $state = $this->runner->state((string) $project->deployment_build_id);
-
-        if ($state === DeploymentState::Running) {
+        if (! $lock->get()) {
             return true;
         }
 
-        if ($state === DeploymentState::Succeeded) {
-            $project->forceFill(['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project), 'failure_reason' => null])->save();
-            $this->progress->step($project, ProjectProgress::DEPLOYMENT, $project->url === null ? 'Desplegado. El proyecto está en vivo.' : "Desplegado. En vivo en {$project->url}", 100);
-        } else {
-            $project->markFailed($this->runner->failure((string) $project->deployment_build_id));
-            $this->progress->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
-        }
+        try {
+            $project->refresh();
 
-        return false;
+            if ($project->status !== ProjectStatus::Building || $project->deployment_build_id === null) {
+                return false;
+            }
+
+            $this->relayOutput($project);
+
+            $state = $this->runner->state($project->deployment_build_id);
+
+            if ($state === DeploymentState::Running) {
+                return true;
+            }
+
+            if ($state === DeploymentState::Succeeded) {
+                $project->forceFill(['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project), 'failure_reason' => null])->save();
+                $this->progress->step($project, ProjectProgress::DEPLOYMENT, $project->url === null ? 'Desplegado. El proyecto está en vivo.' : "Desplegado. En vivo en {$project->url}", 100);
+            } else {
+                $project->markFailed($this->runner->failure($project->deployment_build_id));
+                $this->progress->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
+            }
+
+            return false;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -194,6 +213,14 @@ class ProjectDeployer
             $output = $this->runner->output((string) $project->deployment_build_id, Cache::get($this->cursorKey($project)));
         } catch (DeploymentException $exception) {
             report($exception);
+
+            // Said once per deployment, in the diary itself: a terminal that stays silent
+            // looks like a deployment that hangs, and the cause is usually a missing permission.
+            if (Cache::add($this->cursorKey($project).':unreadable', true, now()->addDay())) {
+                $this->progress->output($project, ProjectProgress::DEPLOYMENT, [
+                    'No se puede leer la salida del build; el despliegue sigue su curso. Motivo: '.$exception->getMessage(),
+                ]);
+            }
 
             return;
         }

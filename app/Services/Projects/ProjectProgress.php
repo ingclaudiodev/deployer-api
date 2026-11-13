@@ -16,7 +16,7 @@ use Throwable;
  * It is a diary, not a source of truth: the state of a project is in its row.
  * Losing the diary loses nothing but the story, so it lives in the cache.
  *
- * @phpstan-type Entry array{id: int, fecha: string, fase: string, tipo: string, mensaje: string, porcentaje: int}
+ * @phpstan-type Entry array{id: int, intento: string, fecha: string, fase: string, tipo: string, mensaje: string, porcentaje: int}
  */
 class ProjectProgress
 {
@@ -48,7 +48,9 @@ class ProjectProgress
     {
         Cache::forget($this->key($project));
 
-        $this->step($project, $phase, $message, $percent);
+        // Every line says which attempt it belongs to, in a form that sorts by time: a screen
+        // holding lines of an earlier attempt can tell them from these and drop them.
+        $this->add($project, $phase, [[self::STEP, $message, $percent]], now()->format('YmdHisv'));
     }
 
     /**
@@ -102,7 +104,7 @@ class ProjectProgress
     /**
      * @param  list<array{0: string, 1: string, 2: int|null}>  $items  Kind, message and percent (`null` keeps the last one).
      */
-    private function add(Project $project, string $phase, array $items): void
+    private function add(Project $project, string $phase, array $items, ?string $attempt = null): void
     {
         if ($items === []) {
             return;
@@ -112,6 +114,7 @@ class ProjectProgress
         $last = end($entries) ?: null;
         $id = $last['id'] ?? 0;
         $percent = $last['porcentaje'] ?? 0;
+        $attempt ??= $last['intento'] ?? now()->format('YmdHisv');
         $added = [];
 
         foreach ($items as [$kind, $message, $itemPercent]) {
@@ -120,6 +123,7 @@ class ProjectProgress
 
             $added[] = [
                 'id' => ++$id,
+                'intento' => $attempt,
                 'fecha' => now()->toIso8601String(),
                 'fase' => $phase,
                 'tipo' => $kind,
