@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Project;
+use App\Services\Projects\ProjectProgress;
 use App\Services\Projects\Deployment\ProjectDeployer;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,6 +41,8 @@ class DeployProject implements ShouldBeUnique, ShouldQueue
     public function failed(?Throwable $exception): void
     {
         $this->project->markFailed('The deployment could not start: '.($exception?->getMessage() ?? 'the job was lost.'));
+
+        app(ProjectProgress::class)->error($this->project, ProjectProgress::DEPLOYMENT, $this->project->failure_reason ?? 'The deployment could not start.');
     }
 
     /**

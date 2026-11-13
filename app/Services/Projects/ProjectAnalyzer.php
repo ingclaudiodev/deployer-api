@@ -56,6 +56,7 @@ class ProjectAnalyzer
         private readonly RepositoryConnector $repositories,
         private readonly CloudArchitectAgent $agent,
         private readonly ProjectFileStore $files,
+        private readonly ProjectProgress $progress,
     ) {}
 
     /**
@@ -73,16 +74,24 @@ class ProjectAnalyzer
         $repository = $project->repo_full_name;
         $branch = $project->repo_branch;
 
+        $phase = ProjectProgress::ANALYSIS;
+        $this->progress->step($project, $phase, "Leyendo el árbol de {$repository} en la rama {$branch}…", 5);
+
         $paths = $this->repositories->tree($user, $provider, $repository, $branch);
+        $keyFiles = $this->keyFiles($paths);
         $manifests = [];
 
-        foreach ($this->keyFiles($paths) as $path) {
+        $this->progress->step($project, $phase, count($paths).' archivos en el repositorio. Leyendo '.count($keyFiles).' archivos clave (manifiestos, puntos de entrada, configuración)…', 12);
+
+        foreach ($keyFiles as $path) {
             $content = $this->repositories->file($user, $provider, $repository, $branch, $path);
 
             if ($content !== null) {
                 $manifests[$path] = $content;
             }
         }
+
+        $this->progress->step($project, $phase, 'Código leído. El arquitecto está razonando sobre los componentes y redactando el despliegue: suele tardar de uno a cinco minutos…', 25);
 
         $analysis = $this->agent->analyze([
             'repository' => $repository,
@@ -91,6 +100,20 @@ class ProjectAnalyzer
             'manifests' => $manifests,
             'target' => $this->target($project),
         ]);
+
+        $this->progress->step($project, $phase, sprintf(
+            'Análisis recibido: %s. %d componentes, %d procesos, %d archivos de despliegue.',
+            implode(' · ', array_filter([$analysis['stack']['language'], $analysis['stack']['framework']])),
+            count($analysis['components']),
+            count($analysis['services']),
+            count($analysis['files']),
+        ), 80);
+
+        foreach ($analysis['components'] as $component) {
+            $this->progress->output($project, $phase, ["  {$component['name']} ({$component['path']}) → {$component['runs_as']}"]);
+        }
+
+        $this->progress->step($project, $phase, 'Guardando los archivos de despliegue…', 90);
 
         foreach ($analysis['files'] as $file) {
             $this->files->put($project, ProjectFileAction::Deployment, $file['path'], $file['content']);
@@ -107,6 +130,8 @@ class ProjectAnalyzer
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
         $project->forceFill(['status' => ProjectStatus::PendingApproval, 'failure_reason' => null])->save();
+
+        $this->progress->step($project, $phase, 'Listo. Revisa el análisis y los archivos, y aprueba para desplegar.', 100);
 
         return $analysis;
     }

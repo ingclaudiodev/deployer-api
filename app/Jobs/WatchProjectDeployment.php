@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\ProjectStatus;
 use App\Models\Project;
 use App\Services\Projects\Deployment\ProjectDeployer;
+use App\Services\Projects\ProjectProgress;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -18,10 +19,10 @@ class WatchProjectDeployment implements ShouldQueue
 {
     use Queueable;
 
-    public const int INTERVAL_SECONDS = 30;
+    public const int INTERVAL_SECONDS = 10;
 
     /** Looks before giving the deployment up for lost: a little over the runner's own timeout. */
-    private const int MAX_LOOKS = 100;
+    private const int MAX_LOOKS = 300;
 
     public int $tries = 1;
 
@@ -49,6 +50,7 @@ class WatchProjectDeployment implements ShouldQueue
 
         if ($this->look >= self::MAX_LOOKS) {
             $project->markFailed('The deployment did not finish in the time allowed.');
+            app(ProjectProgress::class)->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
 
             return;
         }

@@ -9,7 +9,10 @@ use App\Models\User;
 use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
 use App\Services\Projects\Deployment\DeploymentState;
 use App\Services\Projects\Deployment\ProjectDeployer;
+use App\Events\Projects\ProjectProgressed;
 use App\Services\Projects\ProjectAnalyzer;
+use App\Services\Projects\ProjectProgress;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Passport\Passport;
@@ -50,6 +53,15 @@ function fakeDeploymentRunner(DeploymentState $state = DeploymentState::Running)
         public function state(string $runId): DeploymentState
         {
             return $this->state;
+        }
+
+        /** @var list<string> */
+        public array $lines = [];
+
+        public function output(string $runId, ?string $cursor): array
+        {
+            // Like the real one: only what is new since the cursor.
+            return ['lines' => $cursor === null ? $this->lines : [], 'cursor' => 'seen'];
         }
 
         public function failure(string $runId): string
@@ -266,3 +278,71 @@ test('the watcher of an approval that was replaced stops', function (): void {
     expect($project->fresh()->status)->toBe(ProjectStatus::Building);
     Queue::assertNothingPushed();
 });
+
+test('the analysis tells what it does, step by step, up to one hundred percent', function (): void {
+    Queue::fake();
+    Event::fake([ProjectProgressed::class]);
+    fakeProjectFileStore();
+    $project = analysedProject();
+    Passport::actingAs($project->user);
+
+    $entries = $this->getJson(route('projects.progress', $project))->assertOk()->json('entradas');
+
+    expect(array_column($entries, 'fase'))->each->toBe('analisis')
+        ->and(array_column($entries, 'porcentaje'))->toBe(collect($entries)->pluck('porcentaje')->sort()->values()->all())
+        ->and(end($entries)['porcentaje'])->toBe(100)
+        ->and(collect($entries)->where('tipo', 'log')->pluck('mensaje')->all())->toContain('  api (.) → service');
+
+    Event::assertDispatched(ProjectProgressed::class, fn (ProjectProgressed $event): bool => $event->projectId === $project->id
+        && $event->userId === $project->user_id
+        && $event->broadcastAs() === 'project.progress');
+});
+
+test('the deployment relays the output of the build once, its marks as steps with their percentage', function (): void {
+    Queue::fake();
+    fakeProjectFileStore();
+    $runner = fakeDeploymentRunner(DeploymentState::Running);
+    $runner->lines = ['::deployer:: 35 Preparando la infraestructura', 'Created project [dpl-1-orders-api].', ''];
+    $project = analysedProject();
+    $deployer = app(ProjectDeployer::class);
+    $deployer->approve($project, $project->user);
+    $project->forceFill(['deployment_build_id' => 'build-1'])->save();
+
+    (new WatchProjectDeployment($project))->handle($deployer);
+    (new WatchProjectDeployment($project))->handle($deployer);
+
+    $entries = app(ProjectProgress::class)->entries($project);
+
+    expect(array_column($entries, 'tipo'))->toBe(['paso', 'paso', 'log'])
+        ->and(array_column($entries, 'porcentaje'))->toBe([5, 35, 35])
+        ->and($entries[2]['mensaje'])->toBe('Created project [dpl-1-orders-api].');
+});
+
+test('a new approval starts the diary again, and the outcome closes it', function (): void {
+    Queue::fake();
+    $store = fakeProjectFileStore();
+    fakeDeploymentRunner(DeploymentState::Succeeded);
+    $project = analysedProject();
+    $deployer = app(ProjectDeployer::class);
+    $deployer->approve($project, $project->user);
+    $project->forceFill(['deployment_build_id' => 'build-1'])->save();
+    $store->objects["1/orders-api/resultado/{$project->approved_version}.json"] = (string) json_encode([
+        ['metadata' => ['name' => 'orders-api'], 'status' => ['url' => 'https://orders-api.example.test']],
+    ]);
+
+    (new WatchProjectDeployment($project))->handle($deployer);
+
+    $entries = app(ProjectProgress::class)->entries($project);
+
+    expect(array_column($entries, 'fase'))->each->toBe('despliegue')
+        ->and(end($entries))->toMatchArray(['tipo' => 'paso', 'porcentaje' => 100, 'mensaje' => 'Desplegado. En vivo en https://orders-api.example.test']);
+});
+
+test('nobody reads the progress of the project of somebody else', function (): void {
+    fakeProjectFileStore();
+    $project = analysedProject();
+    Passport::actingAs(User::factory()->create());
+
+    $this->getJson(route('projects.progress', $project))->assertNotFound();
+});
+

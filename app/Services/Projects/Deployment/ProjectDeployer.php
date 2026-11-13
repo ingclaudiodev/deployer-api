@@ -13,9 +13,11 @@ use App\Models\User;
 use App\Services\Projects\CloudProject;
 use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
 use App\Services\Projects\ProjectAnalyzer;
+use App\Services\Projects\ProjectProgress;
 use App\Services\Projects\Storage\Contracts\ProjectFileStore;
 use App\Services\Projects\Storage\ProjectFilePath;
 use App\Services\Repositories\RepositoryConnector;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * From a signed analysis to a running project. Approving freezes the files the
@@ -32,10 +34,15 @@ class ProjectDeployer
     private const string SCRIPT = <<<'SH'
         set -euo pipefail
         mkdir -p /workspace/app && cd /workspace/app
+        echo "::deployer:: 20 Descargando el código del repositorio"
         curl -fsSL "$SOURCE_URL" | tar -xz --strip-components=1
+        echo "::deployer:: 28 Copiando los archivos aprobados sobre el código"
         gcloud storage rsync --recursive "gs://$BUCKET/$APPROVED_PREFIX" .
+        echo "::deployer:: 35 Preparando la infraestructura del proyecto $PROJECT (deployer/setup.sh)"
         sh deployer/setup.sh
+        echo "::deployer:: 60 Construyendo la imagen y desplegando (deployer/deploy.sh)"
         sh deployer/deploy.sh
+        echo "::deployer:: 95 Despliegue terminado. Registrando los servicios"
         gcloud run services list --project="$PROJECT" --region="$REGION" --format=json > /workspace/services.json
         gcloud storage cp /workspace/services.json "gs://$BUCKET/$RESULT_OBJECT"
         SH;
@@ -45,6 +52,7 @@ class ProjectDeployer
         private readonly ProjectFileStore $files,
         private readonly RepositoryConnector $repositories,
         private readonly DeploymentRunner $runner,
+        private readonly ProjectProgress $progress,
     ) {}
 
     /**
@@ -88,6 +96,14 @@ class ProjectDeployer
             'failure_reason' => null,
         ])->save();
 
+        Cache::forget($this->cursorKey($project));
+        $this->progress->begin($project, ProjectProgress::DEPLOYMENT, sprintf(
+            'Aprobado por %s. %d archivos firmados y congelados (versión %s). Despliegue en cola…',
+            $user->name ?: $user->email,
+            count($paths),
+            $version,
+        ), 5);
+
         return $project;
     }
 
@@ -106,6 +122,8 @@ class ProjectDeployer
             throw DeploymentException::notConfigured('DEPLOYER_BILLING_ACCOUNT');
         }
 
+        $this->progress->step($project, ProjectProgress::DEPLOYMENT, "Pidiendo el código de {$project->repo_full_name} ({$project->repo_branch}) y lanzando el build aislado…", 10);
+
         $buildId = $this->runner->start(self::SCRIPT, [
             // A link of the host that expires in minutes and opens this archive only: the
             // user's token never leaves the API.
@@ -121,6 +139,8 @@ class ProjectDeployer
         ], ['deployer', "project-{$project->id}"]);
 
         $project->forceFill(['deployment_build_id' => $buildId])->save();
+
+        $this->progress->step($project, ProjectProgress::DEPLOYMENT, "Build {$buildId} lanzado en el proyecto de nube ".CloudProject::idFor($project).'. Esperando su salida…', 15);
     }
 
     /**
@@ -131,6 +151,8 @@ class ProjectDeployer
      */
     public function follow(Project $project): bool
     {
+        $this->relayOutput($project);
+
         $state = $this->runner->state((string) $project->deployment_build_id);
 
         if ($state === DeploymentState::Running) {
@@ -139,11 +161,39 @@ class ProjectDeployer
 
         if ($state === DeploymentState::Succeeded) {
             $project->forceFill(['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project), 'failure_reason' => null])->save();
+            $this->progress->step($project, ProjectProgress::DEPLOYMENT, $project->url === null ? 'Desplegado. El proyecto está en vivo.' : "Desplegado. En vivo en {$project->url}", 100);
         } else {
             $project->markFailed($this->runner->failure((string) $project->deployment_build_id));
+            $this->progress->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
         }
 
         return false;
+    }
+
+    /**
+     * Pass on what the run printed since the last look. Not being able to read
+     * the output must not stop the deployment from being followed.
+     */
+    private function relayOutput(Project $project): void
+    {
+        try {
+            $output = $this->runner->output((string) $project->deployment_build_id, Cache::get($this->cursorKey($project)));
+        } catch (DeploymentException $exception) {
+            report($exception);
+
+            return;
+        }
+
+        if ($output['cursor'] !== null) {
+            Cache::put($this->cursorKey($project), $output['cursor'], now()->addDay());
+        }
+
+        $this->progress->output($project, ProjectProgress::DEPLOYMENT, $output['lines']);
+    }
+
+    private function cursorKey(Project $project): string
+    {
+        return "project-progress-cursor:{$project->id}";
     }
 
     /**
