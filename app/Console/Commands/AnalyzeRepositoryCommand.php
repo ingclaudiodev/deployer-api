@@ -20,8 +20,8 @@ use Illuminate\Support\Facades\File;
  */
 #[Signature('architect:analyze
     {--context= : JSON file with the repository context (repository, files, manifests)}
-    {--output= : Directory where the generated Dockerfile and cloudrun/ folder are written}')]
-#[Description('Analyse a GitHub repository with Vertex AI and generate its Dockerfile and cloudrun/ folder')]
+    {--output= : Directory where the generated Dockerfile and deployer/ folder are written}')]
+#[Description('Analyse a GitHub repository with Vertex AI and generate its Dockerfile and deployer/ folder')]
 class AnalyzeRepositoryCommand extends Command
 {
     public function handle(CloudArchitectAgent $agent): int
@@ -59,7 +59,7 @@ class AnalyzeRepositoryCommand extends Command
     }
 
     /**
-     * Paths arrive already restricted by the agent to Dockerfile, .dockerignore and cloudrun/.
+     * Paths arrive already restricted by the agent to Dockerfile, .dockerignore and deployer/.
      *
      * @param  array<int, array{path: string, content: string}>  $files
      */

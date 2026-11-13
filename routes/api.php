@@ -9,12 +9,23 @@ use App\Http\Controllers\Api\Auth\ResetPasswordController;
 use App\Http\Controllers\Api\Auth\TwoFactorResendController;
 use App\Http\Controllers\Api\Auth\TwoFactorVerifyController;
 use App\Http\Controllers\Api\Pricing\IndexController as PricingIndexController;
+use App\Http\Controllers\Api\Projects\AnalysisController;
+use App\Http\Controllers\Api\Projects\AnalyzeController;
+use App\Http\Controllers\Api\Projects\ApproveController;
+use App\Http\Controllers\Api\Projects\DeploymentBranchController;
+use App\Http\Controllers\Api\Projects\DeploymentFileController;
 use App\Http\Controllers\Api\Projects\DestroyController;
 use App\Http\Controllers\Api\Projects\IndexController;
 use App\Http\Controllers\Api\Projects\OptionsController;
 use App\Http\Controllers\Api\Projects\ShowController;
 use App\Http\Controllers\Api\Projects\StoreController;
 use App\Http\Controllers\Api\Projects\UpdateController;
+use App\Http\Controllers\Api\Repositories\BranchIndexController;
+use App\Http\Controllers\Api\Repositories\CallbackController;
+use App\Http\Controllers\Api\Repositories\ConnectController;
+use App\Http\Controllers\Api\Repositories\ConnectionIndexController;
+use App\Http\Controllers\Api\Repositories\DisconnectController;
+use App\Http\Controllers\Api\Repositories\RepositoryIndexController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->name('auth.')->group(function (): void {
@@ -46,6 +57,30 @@ Route::middleware('auth:api')->prefix('projects')->name('projects.')->group(func
     Route::get('{project}', ShowController::class)->name('show')->whereNumber('project');
     Route::patch('{project}', UpdateController::class)->name('update')->whereNumber('project');
     Route::delete('{project}', DestroyController::class)->name('destroy')->whereNumber('project');
+
+    // From a repository to a deployment to approve: the analysis runs in a queue and its
+    // result lives in the bucket; the branch is an optional copy in the owner's repository.
+    Route::post('{project}/analysis', AnalyzeController::class)->name('analysis.store')->whereNumber('project');
+    Route::get('{project}/analysis', AnalysisController::class)->name('analysis.show')->whereNumber('project');
+    Route::get('{project}/analysis/file', DeploymentFileController::class)->name('analysis.file')->whereNumber('project');
+    Route::post('{project}/approval', ApproveController::class)->name('approval.store')->whereNumber('project');
+    Route::post('{project}/deployment-branch', DeploymentBranchController::class)->name('deployment-branch.store')->whereNumber('project');
+});
+
+// GitHub and GitLab accounts of the signed-in user. `{provider}` is a `RepositoryProvider`:
+// any other value answers 404.
+Route::prefix('repositories')->name('repositories.')->group(function (): void {
+    Route::middleware('auth:api')->group(function (): void {
+        Route::get('connections', ConnectionIndexController::class)->name('connections');
+        Route::post('{provider}/connect', ConnectController::class)->name('connect');
+        Route::get('{provider}/repos', RepositoryIndexController::class)->name('repos');
+        Route::get('{provider}/branches', BranchIndexController::class)->name('branches');
+        Route::delete('{provider}', DisconnectController::class)->name('disconnect');
+    });
+
+    // The host sends the browser here after the user answered: no bearer token, the
+    // `state` identifies the pending connection.
+    Route::get('{provider}/callback', CallbackController::class)->middleware('throttle:30,1')->name('callback');
 });
 
 // Public price list: the landing shows it to visitors without a session.

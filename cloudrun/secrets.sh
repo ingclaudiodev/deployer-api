@@ -74,6 +74,8 @@ if [ "${1:-}" != "access" ]; then
   from_dotenv DB_PASSWORD
   from_dotenv LOG_SLACK_WEBHOOK_URL
   from_dotenv SLACK_WEBHOOK_URL
+  from_dotenv GITHUB_CLIENT_ID
+  from_dotenv GITHUB_CLIENT_SECRET
 
   echo "== nuevos: APP_KEY y claves de Passport"
   name=$(secret_of APP_KEY)

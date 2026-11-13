@@ -34,6 +34,7 @@ use Laravel\Passport\HasApiTokens;
  * @property-read Collection<int, TwoFactorChallenge> $twoFactorChallenges
  * @property-read Collection<int, TrustedDevice> $trustedDevices
  * @property-read Collection<int, Project> $projects
+ * @property-read Collection<int, RepositoryConnection> $repositoryConnections
  */
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
@@ -124,6 +125,16 @@ class User extends Authenticatable implements MustVerifyEmail, OAuthenticatable
     public function projects(): HasMany
     {
         return $this->hasMany(Project::class);
+    }
+
+    /**
+     * GitHub and GitLab accounts this user connected.
+     *
+     * @return HasMany<RepositoryConnection, $this>
+     */
+    public function repositoryConnections(): HasMany
+    {
+        return $this->hasMany(RepositoryConnection::class);
     }
 
     /**

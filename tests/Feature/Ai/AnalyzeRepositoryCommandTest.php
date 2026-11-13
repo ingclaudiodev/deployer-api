@@ -32,8 +32,8 @@ test('it writes the generated files under the output directory', function (): vo
     $this->artisan('architect:analyze', ['--output' => $directory])->assertSuccessful();
 
     expect(File::get("{$directory}/Dockerfile"))->toStartWith('FROM node:22-alpine')
-        ->and(File::exists("{$directory}/cloudrun/services/orders-api.yaml"))->toBeTrue()
-        ->and(File::exists("{$directory}/cloudrun/jobs/migrate.yaml"))->toBeTrue();
+        ->and(File::exists("{$directory}/deployer/services/orders-api.yaml"))->toBeTrue()
+        ->and(File::exists("{$directory}/deployer/jobs/migrate.yaml"))->toBeTrue();
 
     File::deleteDirectory($directory);
 });

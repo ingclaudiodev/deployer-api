@@ -43,6 +43,10 @@ use Illuminate\Support\Carbon;
  * @property bool|null $public_access Kinds that listen: services and instances.
  * @property ProjectStatus $status
  * @property string|null $url
+ * @property Carbon|null $approved_at When the deployment was last signed.
+ * @property int|null $approved_by_id
+ * @property string|null $approved_version Folder of the approved snapshot in the bucket.
+ * @property string|null $deployment_build_id Run that is carrying out, or carried out, the last approval.
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property-read User $user
@@ -104,6 +108,7 @@ class Project extends Model
             'public_access' => 'boolean',
             'gpu_zonal_redundancy' => 'boolean',
             'ephemeral_disk_gb' => 'integer',
+            'approved_at' => 'datetime',
         ];
     }
 
