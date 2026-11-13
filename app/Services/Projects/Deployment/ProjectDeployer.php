@@ -30,6 +30,12 @@ class ProjectDeployer
      * What the runner executes: the repository as it is on its branch, with the
      * approved files laid over it, and then the scripts of the deployment. The
      * last lines leave the services of the project where Deployer can read them.
+     *
+     * Between preparing the project and deploying, the platform itself lets the
+     * project's default build identity build images: in a new project of this
+     * organization it starts with no permissions at all, and `gcloud builds
+     * submit` fails reading its own upload. It is not left to the generated
+     * scripts because every project needs it, whatever its code is.
      */
     private const string SCRIPT = <<<'SH'
         set -euo pipefail
@@ -40,6 +46,14 @@ class ProjectDeployer
         gcloud storage rsync --recursive "gs://$BUCKET/$APPROVED_PREFIX" .
         echo "::deployer:: 35 Preparando la infraestructura del proyecto $PROJECT (deployer/setup.sh)"
         sh deployer/setup.sh
+        echo "::deployer:: 55 Dando permisos a la identidad que construye la imagen"
+        NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+        BUILDER="serviceAccount:$NUMBER-compute@developer.gserviceaccount.com"
+        if ! gcloud projects get-iam-policy "$PROJECT" --flatten='bindings[].members' --filter="bindings.role=roles/cloudbuild.builds.builder AND bindings.members=$BUILDER" --format='value(bindings.role)' | grep -q .; then
+          gcloud projects add-iam-policy-binding "$PROJECT" --member="$BUILDER" --role=roles/cloudbuild.builds.builder --condition=None --quiet > /dev/null
+          echo "Permiso concedido; esperando a que se propague..."
+          sleep 45
+        fi
         echo "::deployer:: 60 Construyendo la imagen y desplegando (deployer/deploy.sh)"
         sh deployer/deploy.sh
         echo "::deployer:: 95 Despliegue terminado. Registrando los servicios"
