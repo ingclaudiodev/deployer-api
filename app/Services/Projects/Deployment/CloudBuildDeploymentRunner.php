@@ -47,14 +47,14 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
         $env = [];
 
         foreach ($environment as $name => $value) {
-            $env[] = "{$name}={$value}";
+            $env[] = "{$name}={$this->literal($value)}";
         }
 
         $response = $this->send('post', '/builds', [
             'steps' => [[
                 'name' => self::IMAGE,
                 'entrypoint' => 'bash',
-                'args' => ['-c', $script],
+                'args' => ['-c', $this->literal($script)],
                 'env' => $env,
             ]],
             'serviceAccount' => "projects/{$this->required($this->project, 'DEPLOYMENT_PROJECT')}/serviceAccounts/{$this->required($this->serviceAccount, 'DEPLOYMENT_SERVICE_ACCOUNT')}",
@@ -167,6 +167,16 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
         }
 
         return Http::withToken($token)->acceptJson()->timeout(self::TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Cloud Build reads `$NAME` in a build as one of its own substitutions and
+     * refuses the ones it does not know. The script and its values are shell, not
+     * a template: `$$` is how a literal `$` is written.
+     */
+    private function literal(string $text): string
+    {
+        return str_replace('$', '$$', $text);
     }
 
     private function required(?string $value, string $key): string
