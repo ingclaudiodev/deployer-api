@@ -31,6 +31,9 @@ class ProjectDeployer
      * approved files laid over it, and then the scripts of the deployment. The
      * last lines leave the services of the project where Deployer can read them.
      *
+     * The bucket keeps no file modes, so the scripts arrive without their
+     * executable bit: it is put back, since one script may call another directly.
+     *
      * Between preparing the project and deploying, the platform itself lets the
      * project's default build identity build images: in a new project of this
      * organization it starts with no permissions at all, and `gcloud builds
@@ -44,6 +47,7 @@ class ProjectDeployer
         curl -fsSL "$SOURCE_URL" | tar -xz --strip-components=1
         echo "::deployer:: 28 Copiando los archivos aprobados sobre el código"
         gcloud storage rsync --recursive "gs://$BUCKET/$APPROVED_PREFIX" .
+        find deployer -type f -name '*.sh' -exec chmod +x {} +
         echo "::deployer:: 35 Preparando la infraestructura del proyecto $PROJECT (deployer/setup.sh)"
         sh deployer/setup.sh
         echo "::deployer:: 55 Dando permisos a la identidad que construye la imagen"
