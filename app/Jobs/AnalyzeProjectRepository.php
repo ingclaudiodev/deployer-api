@@ -8,6 +8,8 @@ use App\Services\Projects\ProjectAnalyzer;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Queue\TimeoutExceededException;
 use Throwable;
 
 /**
@@ -15,8 +17,11 @@ use Throwable;
  * than a request may last. One analysis per project at a time; it is never
  * retried on its own, since every run is a billed call to the model.
  *
- * The queue's `retry_after` must be longer than `$timeout`, or the queue hands
- * the job to a second worker while the first is still waiting for the model.
+ * Three times have to stay in this order: `$timeout`, then the timeout of the
+ * Horizon supervisor, then the queue's `retry_after`. With a supervisor timeout
+ * below `$timeout` Horizon kills the worker mid-analysis when it scales down;
+ * with a `retry_after` below it the queue hands the job to a second worker
+ * while the first is still waiting for the model.
  */
 class AnalyzeProjectRepository implements ShouldBeUnique, ShouldQueue
 {
@@ -46,9 +51,28 @@ class AnalyzeProjectRepository implements ShouldBeUnique, ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
-        $this->project->markFailed('The analysis failed: '.($exception?->getMessage() ?? 'the job was lost.'));
+        $this->project->markFailed('The analysis failed: '.$this->reason($exception));
 
         app(ProjectProgress::class)->error($this->project, ProjectProgress::ANALYSIS, $this->project->failure_reason ?? 'The analysis failed.');
+    }
+
+    /**
+     * Why it failed, in words the owner can act on. When the worker running the
+     * job dies mid-way (its instance went away, its process was stopped) the
+     * queue only finds out later, and all it says is that the job "has been
+     * attempted too many times": true for the queue, meaningless on the screen.
+     */
+    private function reason(?Throwable $exception): string
+    {
+        if ($exception instanceof TimeoutExceededException) {
+            return "it took longer than the {$this->timeout} seconds an analysis may last. Ask for it again.";
+        }
+
+        if ($exception === null || $exception instanceof MaxAttemptsExceededException) {
+            return 'the worker running it stopped before it finished, so nothing was saved. Ask for it again.';
+        }
+
+        return $exception->getMessage();
     }
 
     /**
