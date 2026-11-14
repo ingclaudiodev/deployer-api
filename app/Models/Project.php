@@ -47,6 +47,7 @@ use Illuminate\Support\Carbon;
  * @property int|null $approved_by_id
  * @property string|null $approved_version Folder of the approved snapshot in the bucket.
  * @property string|null $deployment_build_id Run that is carrying out, or carried out, the last approval.
+ * @property string|null $failure_reason Why the last analysis or deployment failed; null when it did not.
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property-read User $user
@@ -110,6 +111,18 @@ class Project extends Model
             'ephemeral_disk_gb' => 'integer',
             'approved_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Leave the project failed, saying why. The reason is what its owner reads,
+     * so it is cut to something a screen can show.
+     */
+    public function markFailed(string $reason): void
+    {
+        $this->forceFill([
+            'status' => ProjectStatus::Failed,
+            'failure_reason' => mb_substr(trim($reason), 0, 2000),
+        ])->save();
     }
 
     /**

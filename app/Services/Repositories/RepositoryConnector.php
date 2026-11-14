@@ -8,6 +8,7 @@ use App\Exceptions\Repositories\TokenRefreshException;
 use App\Models\RepositoryConnection;
 use App\Models\User;
 use App\Services\Repositories\Contracts\RepositoryHost;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -167,7 +168,14 @@ class RepositoryConnector
             throw RepositoryHostException::notConnected($provider);
         }
 
-        return $this->tokens->accessToken($connection);
+        try {
+            return $this->tokens->accessToken($connection);
+        } catch (DecryptException) {
+            // The tokens were stored by an installation with another application key (the
+            // database is shared between environments): here they are unreadable, and the
+            // way out is the same as for a revoked token, connecting the account again.
+            throw RepositoryHostException::unreadableTokens($provider);
+        }
     }
 
     private function host(RepositoryProvider $provider): RepositoryHost

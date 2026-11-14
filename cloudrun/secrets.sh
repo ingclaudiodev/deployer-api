@@ -12,14 +12,11 @@
 #                                       REVERB_APP_ID y REVERB_APP_SECRET se generan nuevos
 #   MAIL_USERNAME / MAIL_PASSWORD    -> ZeptoMail: usuario fijo `emailapikey`; el Send Mail Token
 #                                       se pide por teclado (el .env local apunta a Mailtrap)
-#   túnel chisel                     -> users.json con el AUTH que ya usa el Mac (TUNNEL_ENV) y una
-#                                       clave de servidor NUEVA: cambia la huella que verifica el
-#                                       cliente del Mac (el script dice cómo actualizarla)
 #   clave de Redis                   -> nueva, aleatoria
 #
 # Es repetible: un secreto que ya existe NO se toca. Para reemplazar uno a propósito:
-#   FORCE="MAIL_PASSWORD DB_PASSWORD" sh cloudrun/secrets.sh     (nombres de variable; TUNNEL y
-#   REDIS para los de la VM). Rotar un valor suelto a mano: README, "Operar".
+#   FORCE="MAIL_PASSWORD DB_PASSWORD" sh cloudrun/secrets.sh     (nombres de variable; REDIS para
+#   la clave de Redis). Rotar un valor suelto a mano: README, "Operar".
 #
 # Uso: sh cloudrun/secrets.sh
 #      sh cloudrun/secrets.sh access   solo repite los permisos de lectura
@@ -29,8 +26,6 @@ cd "$(dirname "$0")/.."
 G="gcloud --project=$PROJECT"
 DOTENV=${DOTENV:-.env}
 FRONTEND_ENV=${FRONTEND_ENV:-../deployer/.env.yaml}
-TUNNEL_ENV=${TUNNEL_ENV:-$HOME/.config/deployer-db-tunnel/env}
-CHISEL=${CHISEL:-$HOME/.local/bin/chisel}
 
 exists() { $G secrets describe "$1" >/dev/null 2>&1 </dev/null; }
 
@@ -131,17 +126,6 @@ if [ "${1:-}" != "access" ]; then
     token=
   fi
 
-  echo "== túnel chisel"
-  if wanted TUNNEL "$SECRET_TUNNEL_USERS"; then
-    # shellcheck disable=SC1090
-    AUTH=$(. "$TUNNEL_ENV" && printf '%s' "$AUTH")
-    # Solo se permite el remoto inverso R:0.0.0.0:5432 (publicar el Postgres del Mac).
-    AUTH="$AUTH" python3 -c 'import json,os; print(json.dumps({os.environ["AUTH"]: ["^R:0\\.0\\.0\\.0:5432$"]}))' \
-      | put "$SECRET_TUNNEL_USERS"
-    AUTH=
-    "$CHISEL" server --keygen - 2>/dev/null | tr -d '\n' | put "$SECRET_TUNNEL_KEY"
-  fi
-
   echo "== clave de Redis"
   if wanted REDIS "$SECRET_REDIS_PASSWORD"; then
     openssl rand -hex 24 | tr -d '\n' | put "$SECRET_REDIS_PASSWORD"
@@ -149,34 +133,10 @@ if [ "${1:-}" != "access" ]; then
 fi
 
 echo "== permisos de lectura"
-# Cloud Run: cada secreto de los .map. La VM: solo los tres suyos.
+# Cloud Run: cada secreto de los .map. La VM: la clave de Redis y la de la base (con ella crea el rol).
 cat cloudrun/env/secrets.map cloudrun/env/secrets-reverb.map | grep -Ev '^[[:space:]]*(#|$)' \
   | cut -d= -f2 | sort -u | while read -r name; do grant "$name" "$RUN_SA_EMAIL"; done
-for name in "$SECRET_TUNNEL_USERS" "$SECRET_TUNNEL_KEY" "$SECRET_REDIS_PASSWORD"; do
+for name in "$(secret_of DB_PASSWORD)" "$SECRET_REDIS_PASSWORD"; do
   grant "$name" "$VM_SA_EMAIL"
 done
-
-# Huella de la clave del servidor chisel: el cliente del Mac la verifica con --fingerprint. Se
-# calcula levantando un servidor local un instante con esa clave (no hay otra forma de derivarla).
-if exists "$SECRET_TUNNEL_KEY" && [ -x "$CHISEL" ]; then
-  log=$(mktemp)
-  CHISEL_KEY_FILE=$($G secrets versions access latest --secret="$SECRET_TUNNEL_KEY") \
-    "$CHISEL" server --host 127.0.0.1 --port 59431 >"$log" 2>&1 &
-  pid=$!; sleep 1; kill "$pid" 2>/dev/null || true
-  NEW=$(sed -n 's/.*Fingerprint //p' "$log" | head -1); rm -f "$log"
-  CUR=$(grep -E '^FINGERPRINT=' "$TUNNEL_ENV" | cut -d= -f2-)
-  if [ -z "$NEW" ]; then
-    echo "No se pudo calcular la huella; leerla en la VM: sudo journalctl -u chisel-server | grep Fingerprint"
-  elif [ "$NEW" = "$CUR" ]; then
-    echo "Huella del túnel: el Mac ya tiene la correcta."
-  else
-    cat <<EOF
-
-HUELLA NUEVA del servidor del túnel: $NEW
-El cliente del Mac aún tiene la del clúster y rechazará a la VM. Actualizarla (después de crear la VM):
-  sed -i '' 's|^FINGERPRINT=.*|FINGERPRINT=$NEW|' $TUNNEL_ENV
-  launchctl kickstart -k gui/\$(id -u)/cl.deployer.db-tunnel
-EOF
-  fi
-fi
 echo "Listo. Ver: gcloud secrets list --project=$PROJECT --filter='name~deployer'"

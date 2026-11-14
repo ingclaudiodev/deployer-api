@@ -37,8 +37,15 @@ x-app: &app
     PHP_OPCACHE_VALIDATE_TIMESTAMPS: 1
     OCTANE_WATCH: ${OCTANE_WATCH:-true}
     HORIZON_WATCH: ${HORIZON_WATCH:-true}
+    # Vertex AI, el bucket de proyectos y Cloud Build se autentican con Application Default
+    # Credentials. En el contenedor no existe el gcloud del anfitrión: se monta su archivo (solo
+    # lectura) y se apunta a él. Sin esto las llamadas salen anónimas y Google responde 401/403.
+    GOOGLE_APPLICATION_CREDENTIALS: /run/gcloud/application_default_credentials.json
   volumes:
     - .:/var/www/html
+    # Lo crea `gcloud auth application-default login` en el Mac. Si no existe, Docker crea ahí
+    # una carpeta vacía: correr ese comando ANTES de `docker compose up`.
+    - ${HOME}/.config/gcloud/application_default_credentials.json:/run/gcloud/application_default_credentials.json:ro
   extra_hosts:
     - "host.docker.internal:host-gateway"
   depends_on:

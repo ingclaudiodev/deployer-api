@@ -13,9 +13,11 @@ use App\Models\User;
 use App\Services\Projects\CloudProject;
 use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
 use App\Services\Projects\ProjectAnalyzer;
+use App\Services\Projects\ProjectProgress;
 use App\Services\Projects\Storage\Contracts\ProjectFileStore;
 use App\Services\Projects\Storage\ProjectFilePath;
 use App\Services\Repositories\RepositoryConnector;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * From a signed analysis to a running project. Approving freezes the files the
@@ -28,14 +30,51 @@ class ProjectDeployer
      * What the runner executes: the repository as it is on its branch, with the
      * approved files laid over it, and then the scripts of the deployment. The
      * last lines leave the services of the project where Deployer can read them.
+     *
+     * The bucket keeps no file modes, so the scripts arrive without their
+     * executable bit: it is put back, since one script may call another directly.
+     *
+     * The preparation is tried up to three times. Google Cloud is eventually
+     * consistent: a service account just created may not exist yet for the
+     * command that grants it a role, and the script ends there. Its steps check
+     * before they create, so running it again picks up where it failed.
+     *
+     * Between preparing the project and deploying, the platform itself lets the
+     * project's default build identity build images: in a new project of this
+     * organization it starts with no permissions at all, and `gcloud builds
+     * submit` fails reading its own upload. It is not left to the generated
+     * scripts because every project needs it, whatever its code is.
      */
     private const string SCRIPT = <<<'SH'
         set -euo pipefail
         mkdir -p /workspace/app && cd /workspace/app
+        echo "::deployer:: 20 Descargando el código del repositorio"
         curl -fsSL "$SOURCE_URL" | tar -xz --strip-components=1
+        echo "::deployer:: 28 Copiando los archivos aprobados sobre el código"
         gcloud storage rsync --recursive "gs://$BUCKET/$APPROVED_PREFIX" .
-        sh deployer/setup.sh
+        find deployer -type f -name '*.sh' -exec chmod +x {} +
+        echo "::deployer:: 35 Preparando la infraestructura del proyecto $PROJECT (deployer/setup.sh)"
+        ATTEMPT=1
+        until sh deployer/setup.sh; do
+          if [ "$ATTEMPT" -ge 3 ]; then
+            echo "La preparación de la infraestructura falló $ATTEMPT veces seguidas."
+            exit 1
+          fi
+          ATTEMPT=$((ATTEMPT + 1))
+          echo "La preparación falló; puede ser un recurso recién creado que aún no se propaga. Reintentando en 20 s (intento $ATTEMPT de 3)..."
+          sleep 20
+        done
+        echo "::deployer:: 55 Dando permisos a la identidad que construye la imagen"
+        NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+        BUILDER="serviceAccount:$NUMBER-compute@developer.gserviceaccount.com"
+        if ! gcloud projects get-iam-policy "$PROJECT" --flatten='bindings[].members' --filter="bindings.role=roles/cloudbuild.builds.builder AND bindings.members=$BUILDER" --format='value(bindings.role)' | grep -q .; then
+          gcloud projects add-iam-policy-binding "$PROJECT" --member="$BUILDER" --role=roles/cloudbuild.builds.builder --condition=None --quiet > /dev/null
+          echo "Permiso concedido; esperando a que se propague..."
+          sleep 45
+        fi
+        echo "::deployer:: 60 Construyendo la imagen y desplegando (deployer/deploy.sh)"
         sh deployer/deploy.sh
+        echo "::deployer:: 95 Despliegue terminado. Registrando los servicios"
         gcloud run services list --project="$PROJECT" --region="$REGION" --format=json > /workspace/services.json
         gcloud storage cp /workspace/services.json "gs://$BUCKET/$RESULT_OBJECT"
         SH;
@@ -45,6 +84,7 @@ class ProjectDeployer
         private readonly ProjectFileStore $files,
         private readonly RepositoryConnector $repositories,
         private readonly DeploymentRunner $runner,
+        private readonly ProjectProgress $progress,
     ) {}
 
     /**
@@ -55,7 +95,9 @@ class ProjectDeployer
      */
     public function approve(Project $project, User $user): Project
     {
-        if ($project->status !== ProjectStatus::PendingApproval) {
+        // A failed project can be signed again: the analysis on screen is still there, and
+        // most failures are of the deployment, not of what was analysed.
+        if (! in_array($project->status, [ProjectStatus::PendingApproval, ProjectStatus::Failed], true)) {
             throw DeploymentException::notApprovable('it has no analysis waiting for approval.');
         }
 
@@ -83,7 +125,17 @@ class ProjectDeployer
             'approved_by_id' => $user->id,
             'approved_version' => $version,
             'deployment_build_id' => null,
+            'failure_reason' => null,
         ])->save();
+
+        Cache::forget($this->cursorKey($project));
+        Cache::forget($this->cursorKey($project).':unreadable');
+        $this->progress->begin($project, ProjectProgress::DEPLOYMENT, sprintf(
+            'Aprobado por %s. %d archivos firmados y congelados (versión %s). Despliegue en cola…',
+            $user->name ?: $user->email,
+            count($paths),
+            $version,
+        ), 5);
 
         return $project;
     }
@@ -103,6 +155,8 @@ class ProjectDeployer
             throw DeploymentException::notConfigured('DEPLOYER_BILLING_ACCOUNT');
         }
 
+        $this->progress->step($project, ProjectProgress::DEPLOYMENT, "Pidiendo el código de {$project->repo_full_name} ({$project->repo_branch}) y lanzando el build aislado…", 10);
+
         $buildId = $this->runner->start(self::SCRIPT, [
             // A link of the host that expires in minutes and opens this archive only: the
             // user's token never leaves the API.
@@ -118,6 +172,8 @@ class ProjectDeployer
         ], ['deployer', "project-{$project->id}"]);
 
         $project->forceFill(['deployment_build_id' => $buildId])->save();
+
+        $this->progress->step($project, ProjectProgress::DEPLOYMENT, "Build {$buildId} lanzado en el proyecto de nube ".CloudProject::idFor($project).'. Esperando su salida…', 15);
     }
 
     /**
@@ -128,17 +184,75 @@ class ProjectDeployer
      */
     public function follow(Project $project): bool
     {
-        $state = $this->runner->state((string) $project->deployment_build_id);
+        // The queue and the screen both look at a running deployment. One at a time:
+        // two looks at once would relay the same output twice.
+        $lock = Cache::lock("project-follow:{$project->id}", 60);
 
-        if ($state === DeploymentState::Running) {
+        if (! $lock->get()) {
             return true;
         }
 
-        $project->forceFill($state === DeploymentState::Succeeded
-            ? ['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project)]
-            : ['status' => ProjectStatus::Failed])->save();
+        try {
+            $project->refresh();
 
-        return false;
+            if ($project->status !== ProjectStatus::Building || $project->deployment_build_id === null) {
+                return false;
+            }
+
+            $this->relayOutput($project);
+
+            $state = $this->runner->state($project->deployment_build_id);
+
+            if ($state === DeploymentState::Running) {
+                return true;
+            }
+
+            if ($state === DeploymentState::Succeeded) {
+                $project->forceFill(['status' => ProjectStatus::Live, 'url' => $this->publicUrl($project), 'failure_reason' => null])->save();
+                $this->progress->step($project, ProjectProgress::DEPLOYMENT, $project->url === null ? 'Desplegado. El proyecto está en vivo.' : "Desplegado. En vivo en {$project->url}", 100);
+            } else {
+                $project->markFailed($this->runner->failure($project->deployment_build_id));
+                $this->progress->error($project, ProjectProgress::DEPLOYMENT, (string) $project->failure_reason);
+            }
+
+            return false;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Pass on what the run printed since the last look. Not being able to read
+     * the output must not stop the deployment from being followed.
+     */
+    private function relayOutput(Project $project): void
+    {
+        try {
+            $output = $this->runner->output((string) $project->deployment_build_id, Cache::get($this->cursorKey($project)));
+        } catch (DeploymentException $exception) {
+            report($exception);
+
+            // Said once per deployment, in the diary itself: a terminal that stays silent
+            // looks like a deployment that hangs, and the cause is usually a missing permission.
+            if (Cache::add($this->cursorKey($project).':unreadable', true, now()->addDay())) {
+                $this->progress->output($project, ProjectProgress::DEPLOYMENT, [
+                    'No se puede leer la salida del build; el despliegue sigue su curso. Motivo: '.$exception->getMessage(),
+                ]);
+            }
+
+            return;
+        }
+
+        if ($output['cursor'] !== null) {
+            Cache::put($this->cursorKey($project), $output['cursor'], now()->addDay());
+        }
+
+        $this->progress->output($project, ProjectProgress::DEPLOYMENT, $output['lines']);
+    }
+
+    private function cursorKey(Project $project): string
+    {
+        return "project-progress-cursor:{$project->id}";
     }
 
     /**

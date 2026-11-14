@@ -42,7 +42,7 @@ else
   fi
   [ "${BUILD_ONLY:-0}" = "1" ] && exit 0
 
-  # IP interna de la VM (túnel al Postgres + Redis): sale de la dirección reservada, no del repo.
+  # IP interna de la VM de datos (PostgreSQL + Redis): sale de la dirección reservada, no del repo.
   INFRA_IP=$($G compute addresses describe "$INFRA_IP_NAME" --region="$REGION" --format='value(address)') || {
     echo "No existe la dirección $INFRA_IP_NAME: corre antes 'sh cloudrun/setup.sh vm'." >&2; exit 1; }
 

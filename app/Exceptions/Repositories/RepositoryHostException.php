@@ -74,6 +74,17 @@ class RepositoryHostException extends RuntimeException
         return $exception;
     }
 
+    /**
+     * The stored tokens cannot be decrypted with this installation's key.
+     */
+    public static function unreadableTokens(RepositoryProvider $provider): self
+    {
+        $exception = new self("The stored {$provider->value} tokens cannot be read with this application key.");
+        $exception->requiresReconnection = true;
+
+        return $exception;
+    }
+
     public static function notConnected(RepositoryProvider $provider): self
     {
         $exception = new self("The user has no {$provider->value} account connected.");

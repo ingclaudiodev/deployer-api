@@ -23,6 +23,11 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
 {
     private const string API = 'https://cloudbuild.googleapis.com/v1';
 
+    private const string LOGGING_API = 'https://logging.googleapis.com/v2';
+
+    /** Lines read each time the run is looked at; the rest wait for the next look. */
+    private const int LOG_LINES_PER_LOOK = 200;
+
     private const string SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
     /** Image with gcloud, curl and tar. */
@@ -42,14 +47,14 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
         $env = [];
 
         foreach ($environment as $name => $value) {
-            $env[] = "{$name}={$value}";
+            $env[] = "{$name}={$this->literal($value)}";
         }
 
         $response = $this->send('post', '/builds', [
             'steps' => [[
                 'name' => self::IMAGE,
                 'entrypoint' => 'bash',
-                'args' => ['-c', $script],
+                'args' => ['-c', $this->literal($script)],
                 'env' => $env,
             ]],
             'serviceAccount' => "projects/{$this->required($this->project, 'DEPLOYMENT_PROJECT')}/serviceAccounts/{$this->required($this->serviceAccount, 'DEPLOYMENT_SERVICE_ACCOUNT')}",
@@ -77,6 +82,55 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
             'QUEUED', 'PENDING', 'WORKING' => DeploymentState::Running,
             default => DeploymentState::Failed,
         };
+    }
+
+    public function output(string $runId, ?string $cursor): array
+    {
+        // A build with its own service account logs to Cloud Logging only: its output is
+        // read from there. The cursor is the time of the last line seen.
+        $filter = sprintf('resource.type="build" AND resource.labels.build_id="%s"', $runId)
+            .($cursor === null ? '' : sprintf(' AND timestamp>"%s"', $cursor));
+
+        try {
+            $response = $this->client()->post(self::LOGGING_API.'/entries:list', [
+                'resourceNames' => ["projects/{$this->required($this->project, 'DEPLOYMENT_PROJECT')}"],
+                'filter' => $filter,
+                'orderBy' => 'timestamp asc',
+                'pageSize' => self::LOG_LINES_PER_LOOK,
+            ]);
+        } catch (ConnectionException $exception) {
+            throw DeploymentException::requestFailed($exception);
+        }
+
+        if (! $response->successful()) {
+            throw DeploymentException::unexpectedAnswer($response->status(), $response->body());
+        }
+
+        $lines = [];
+
+        foreach ((array) $response->json('entries') as $entry) {
+            if (is_array($entry) && is_string($entry['textPayload'] ?? null)) {
+                $lines[] = $entry['textPayload'];
+                $cursor = is_string($entry['timestamp'] ?? null) ? $entry['timestamp'] : $cursor;
+            }
+        }
+
+        return ['lines' => $lines, 'cursor' => $cursor];
+    }
+
+    public function failure(string $runId): string
+    {
+        $build = $this->send('get', "/builds/{$runId}");
+        $step = collect($build['steps'] ?? [])->first(fn (mixed $step): bool => is_array($step) && ($step['status'] ?? null) === 'FAILURE');
+
+        return implode(' ', array_filter([
+            'Build '.$runId.' ended as '.($build['status'] ?? 'UNKNOWN').'.',
+            is_string($build['statusDetail'] ?? null) ? $build['statusDetail'] : null,
+            is_string($build['failureInfo']['detail'] ?? null) ? $build['failureInfo']['detail'] : null,
+            is_array($step) && isset($step['exitCode']) ? "The script exited with code {$step['exitCode']}." : null,
+            // The output of the script is in the logs of the build, not in this answer.
+            is_string($build['logUrl'] ?? null) ? 'Logs: '.$build['logUrl'] : null,
+        ]));
     }
 
     /**
@@ -113,6 +167,16 @@ class CloudBuildDeploymentRunner implements DeploymentRunner
         }
 
         return Http::withToken($token)->acceptJson()->timeout(self::TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Cloud Build reads `$NAME` in a build as one of its own substitutions and
+     * refuses the ones it does not know. The script and its values are shell, not
+     * a template: `$$` is how a literal `$` is written.
+     */
+    private function literal(string $text): string
+    {
+        return str_replace('$', '$$', $text);
     }
 
     private function required(?string $value, string $key): string

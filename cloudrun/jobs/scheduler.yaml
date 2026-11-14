@@ -17,7 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${SUBNET}","tags":["${RUN_TAG}"]}]'
+        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${RUN_SUBNET}","tags":["${RUN_TAG}"]}]'
         run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
       taskCount: 1

@@ -4,6 +4,7 @@ use App\Enums\RepositoryProvider;
 use App\Models\RepositoryConnection;
 use App\Models\User;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
 
@@ -282,3 +283,18 @@ test('disconnecting forgets the tokens of that account only', function (): void 
     expect($user->repositoryConnections()->count())->toBe(0)
         ->and($other->fresh())->not->toBeNull();
 });
+
+test('tokens stored with another application key ask for a reconnection instead of failing', function (): void {
+    Http::fake();
+    $user = User::factory()->create();
+    $connection = RepositoryConnection::factory()->for($user)->create();
+    DB::table('repository_connections')->where('id', $connection->id)->update(['access_token' => 'encrypted-elsewhere']);
+    Passport::actingAs($user);
+
+    $this->getJson(route('repositories.repos', ['provider' => 'github']))
+        ->assertConflict()
+        ->assertJsonPath('reconectar', true);
+
+    Http::assertNothingSent();
+});
+

@@ -7,6 +7,7 @@ use App\Models\RepositoryConnection;
 use App\Models\User;
 use App\Services\Projects\ProjectAnalyzer;
 use Illuminate\Http\Client\Request;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Passport\Passport;
@@ -140,6 +141,26 @@ test('an analysis that fails leaves the project failed', function (): void {
     (new AnalyzeProjectRepository($project))->failed(new RuntimeException('boom'));
 
     expect($project->fresh()->status)->toBe(ProjectStatus::Failed);
+});
+
+test('an analysis whose worker died says so instead of repeating the wording of the queue', function (): void {
+    $project = connectedProject();
+
+    (new AnalyzeProjectRepository($project))->failed(
+        new MaxAttemptsExceededException('App\\Jobs\\AnalyzeProjectRepository has been attempted too many times.'),
+    );
+
+    expect($project->fresh()->failure_reason)
+        ->toContain('stopped before it finished')
+        ->not->toContain('attempted too many times');
+});
+
+test('no worker is stopped, and no second one is started, while an analysis is within its time', function (): void {
+    $analysis = (new AnalyzeProjectRepository(Project::factory()->make()))->timeout;
+    $worker = config('horizon.defaults.supervisor-1.timeout');
+
+    expect($analysis)->toBeLessThan($worker)
+        ->and($worker)->toBeLessThan(config('queue.connections.redis.retry_after'));
 });
 
 test('the stored analysis is served to its owner', function (): void {

@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Projects\DeploymentFileController;
 use App\Http\Controllers\Api\Projects\DestroyController;
 use App\Http\Controllers\Api\Projects\IndexController;
 use App\Http\Controllers\Api\Projects\OptionsController;
+use App\Http\Controllers\Api\Projects\ProgressController;
 use App\Http\Controllers\Api\Projects\ShowController;
 use App\Http\Controllers\Api\Projects\StoreController;
 use App\Http\Controllers\Api\Projects\UpdateController;
@@ -63,6 +64,7 @@ Route::middleware('auth:api')->prefix('projects')->name('projects.')->group(func
     Route::post('{project}/analysis', AnalyzeController::class)->name('analysis.store')->whereNumber('project');
     Route::get('{project}/analysis', AnalysisController::class)->name('analysis.show')->whereNumber('project');
     Route::get('{project}/analysis/file', DeploymentFileController::class)->name('analysis.file')->whereNumber('project');
+    Route::get('{project}/progress', ProgressController::class)->name('progress')->whereNumber('project');
     Route::post('{project}/approval', ApproveController::class)->name('approval.store')->whereNumber('project');
     Route::post('{project}/deployment-branch', DeploymentBranchController::class)->name('deployment-branch.store')->whereNumber('project');
 });

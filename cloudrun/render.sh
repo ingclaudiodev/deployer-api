@@ -12,7 +12,7 @@ set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)
 . "$DIR/config.sh"
 : "${IMAGE:?falta IMAGE (imagen con tag)}"
-: "${INFRA_IP:?falta INFRA_IP (IP interna de la VM deployer-infra)}"
+: "${INFRA_IP:?falta INFRA_IP (IP interna de la VM de datos)}"
 TEMPLATE=${1:?uso: render.sh <plantilla.yaml>}
 
 RENDERED=$(awk -v envdir="$DIR/env" -v skip=" ${SKIP_SECRETS:-} " '
@@ -51,7 +51,7 @@ printf '%s\n' "$RENDERED" | sed \
     -e "s|\${PROJECT}|$PROJECT|g" \
     -e "s|\${REGION}|$REGION|g" \
     -e "s|\${NETWORK}|$NETWORK|g" \
-    -e "s|\${SUBNET}|$SUBNET|g" \
+    -e "s|\${RUN_SUBNET}|$RUN_SUBNET|g" \
     -e "s|\${RUN_TAG}|$RUN_TAG|g" \
     -e "s|\${RUN_SA_EMAIL}|$RUN_SA_EMAIL|g" \
     -e "s|\${API_SERVICE}|$API_SERVICE|g" \

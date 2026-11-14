@@ -28,4 +28,21 @@ interface DeploymentRunner
      * @throws DeploymentException
      */
     public function state(string $runId): DeploymentState;
+
+    /**
+     * What the runner says about why a run failed, for a person to read.
+     *
+     * @throws DeploymentException
+     */
+    public function failure(string $runId): string;
+
+    /**
+     * Lines the run printed after the given cursor (`null` for the beginning),
+     * oldest first, and the cursor to ask from next time.
+     *
+     * @return array{lines: list<string>, cursor: string|null}
+     *
+     * @throws DeploymentException
+     */
+    public function output(string $runId, ?string $cursor): array;
 }

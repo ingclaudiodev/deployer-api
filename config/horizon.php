@@ -207,7 +207,11 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            'timeout' => 60,
+            // Longer than the longest job (an analysis waits for the model up to 540 s) and
+            // shorter than the queue's retry_after. Horizon also stops for good a worker it
+            // is scaling down once these seconds pass, whatever the worker is doing: at 60
+            // it killed every analysis that took more than a minute, without a trace.
+            'timeout' => 570,
             'nice' => 0,
         ],
     ],

@@ -61,6 +61,11 @@ class CloudArchitectAgent
         - Every application runs in a Google Cloud project of its own, inside one organization. The project is created for the application and holds nothing else. target.project_id is that project, target.organization_id the organization and target.region the region. Never deploy to any other project.
         - Billing is linked from an account the operator provides in the environment as BILLING_ACCOUNT. Never write a billing account, a key or a credential in a file.
         - The scripts run unattended in a build environment, already authenticated as a service account. They never open a browser, never ask a question and never call `gcloud auth` or `gcloud config set`: every gcloud command carries --project="$PROJECT" (and --region="$REGION" where the command takes one) and --quiet.
+        - When one script uses another, it runs it with `sh "$(dirname "$0")/other.sh"` or sources it with `.`; never as `./other.sh`, which depends on a file mode the scripts may not have.
+        - Between setup.sh and deploy.sh the platform grants the project's default build identity what `gcloud builds submit` needs (roles/cloudbuild.builds.builder). Do not create a build service account and do not pass --service-account to `gcloud builds submit`.
+        - Cloud Run sets some environment variables itself and refuses a deployment that declares them: PORT, K_SERVICE, K_REVISION and K_CONFIGURATION in a service; CLOUD_RUN_JOB, CLOUD_RUN_EXECUTION, CLOUD_RUN_TASK_INDEX, CLOUD_RUN_TASK_ATTEMPT and CLOUD_RUN_TASK_COUNT in a job. Never write one of them in common.env, in secrets.map, in env_vars or under `env:`. The port is declared once, as PORT in config.sh, and reaches Cloud Run only as `containerPort: ${PORT}` in the template of the service; Cloud Run then hands the container the PORT variable it listens on.
+        - A public service is opened in its own template, with the annotation `run.googleapis.com/invoker-iam-disabled: 'true'` under metadata.annotations of the Service (the top-level metadata, not spec.template.metadata). Never grant roles/run.invoker to allUsers, in setup.sh or in deploy.sh: the organization may forbid members outside its domain, and then the command fails and takes the deployment with it. A service that is not public does not carry the annotation.
+        - Google Cloud is eventually consistent: a service account just created may not exist yet for the next command, and granting it a role then fails with "Service account ... does not exist". Every command that grants a role to, or names as a member, a service account the scripts create (the `iam` and `scheduler` steps of setup.sh, secrets.sh) is retried: up to 6 attempts, 10 seconds apart, through one small shell function defined once in config.sh, failing only after the last attempt. Waiting for `gcloud iam service-accounts describe` to succeed is not enough: the grant can still fail after it. Every `gcloud projects add-iam-policy-binding` carries --condition=None.
         - Use only generally available gcloud commands, with the flags they have today. No `alpha`; `beta` only when the feature has no GA command, and say so in warnings. When you are not sure a flag exists, prefer the declarative path (`gcloud run services replace` / `gcloud run jobs replace` with a YAML file), which you control completely.
         - target.limits are the ceiling the owner pays for. The process that matches target.kind (the public service for "servicio", the job for "tarea", the worker for "trabajadores") takes exactly those values of cpu, memory, instances, concurrency, timeout, port and public access. Any other process you add must be justified in its purpose and sized at the minimum.
 
@@ -79,7 +84,7 @@ class CloudArchitectAgent
             - "deployer/services/<name>.yaml" for each service: a Knative Service template (apiVersion serving.knative.dev/v1). Under `env:` it carries the marker lines `# @env common.env` and `# @secrets secrets.map` instead of repeating the variables.
             - "deployer/jobs/<name>.yaml" for each job: a Cloud Run Job template (apiVersion run.googleapis.com/v1, kind Job) with the same markers.
             - "deployer/render.sh": prints the final YAML of a template: expands each marker into `- name/value` entries (common.env) or `- name/valueFrom.secretKeyRef` entries with key latest (secrets.map), and replaces the ${...} placeholders with the values of config.sh.
-            - "deployer/setup.sh": one-time preparation by step, chosen with its first argument, each step safe to repeat (it checks before it creates): `project` (create the project in the organization when it does not exist, with `gcloud projects create "$PROJECT" --organization="$ORGANIZATION_ID"`, and link billing with `gcloud billing projects link "$PROJECT" --billing-account="$BILLING_ACCOUNT"`), `apis` (`gcloud services enable` for run.googleapis.com, artifactregistry.googleapis.com, cloudbuild.googleapis.com, secretmanager.googleapis.com, iam.googleapis.com and logging.googleapis.com, plus any API a backing service needs), `registry` (the Docker repository in Artifact Registry, `gcloud artifacts repositories create` with --repository-format=docker and --location="$REGION"), `iam` (the runtime service account and only the roles it needs: roles/secretmanager.secretAccessor, roles/logging.logWriter and those of its backing services) and `public` (allow unauthenticated calls to the public service, only when it is public). Without an argument it runs every step in that order.
+            - "deployer/setup.sh": one-time preparation by step, chosen with its first argument, each step safe to repeat (it checks before it creates): `project` (create the project in the organization when it does not exist, with `gcloud projects create "$PROJECT" --organization="$ORGANIZATION_ID"`, and link billing with `gcloud billing projects link "$PROJECT" --billing-account="$BILLING_ACCOUNT"`), `apis` (`gcloud services enable` for run.googleapis.com, artifactregistry.googleapis.com, cloudbuild.googleapis.com, secretmanager.googleapis.com, iam.googleapis.com and logging.googleapis.com, plus any API a backing service needs), `registry` (the Docker repository in Artifact Registry, `gcloud artifacts repositories create` with --repository-format=docker and --location="$REGION") and `iam` (the runtime service account and only the roles it needs: roles/secretmanager.secretAccessor, roles/logging.logWriter and those of its backing services). Without an argument it runs every step in that order.
             - "deployer/secrets.sh": creates in Secret Manager each secret of secrets.map, taking its value from the local .env, and lets the service account read it.
             - "deployer/deploy.sh": starts with `set -eu`, builds and pushes the image with Cloud Build (`gcloud builds submit --tag "$IMAGE"`, the image tagged "$VERSION", which the platform passes in the environment, never `latest`), renders and applies every job and service (`gcloud run jobs replace`, `gcloud run services replace`), runs the migration job first when there is one (`gcloud run jobs execute --wait`) and stops without deploying anything if it fails, and ends printing the URL of the public service.
             - "deployer/README.md": what each file is, the first deployment step by step and how to verify it.
@@ -108,6 +113,23 @@ class CloudArchitectAgent
      * trust that no path escapes the repository or overwrites application code.
      */
     private const string WRITABLE_PATH = 'regex:/^(Dockerfile|\.dockerignore|deployer\/[A-Za-z0-9._\/-]+)$/';
+
+    /**
+     * Variables Cloud Run sets on its own. It refuses a whole deployment that
+     * declares one of them, minutes after the image was built.
+     *
+     * @var array<int, string>
+     */
+    private const array RESERVED_VARIABLES = [
+        'PORT', 'K_SERVICE', 'K_REVISION', 'K_CONFIGURATION',
+        'CLOUD_RUN_JOB', 'CLOUD_RUN_EXECUTION', 'CLOUD_RUN_TASK_INDEX', 'CLOUD_RUN_TASK_ATTEMPT', 'CLOUD_RUN_TASK_COUNT',
+    ];
+
+    /**
+     * What opens a service to the internet without granting a role to allUsers,
+     * which an organization that restricts members to its own domain forbids.
+     */
+    private const string PUBLIC_ANNOTATION = 'run.googleapis.com/invoker-iam-disabled';
 
     public function __construct(
         private readonly GenerativeModel $model,
@@ -142,12 +164,15 @@ class CloudArchitectAgent
             throw InvalidAnalysisException::unexpectedShape($validator->errors()->all());
         }
 
-        $this->assertDeployable($validator->validated());
-        $this->assertOnTarget($validator->validated(), $repository['target'] ?? null);
+        $accepted = $this->withoutReservedVariables($validator->validated());
+
+        $this->assertDeployable($accepted);
+        $this->assertAcceptedByCloudRun($accepted);
+        $this->assertOnTarget($accepted, $repository['target'] ?? null);
 
         /** @var Analysis */
         return [
-            ...$validator->validated(),
+            ...$accepted,
             'usage' => [
                 'model' => $answer->model,
                 'input_tokens' => $answer->inputTokens,
@@ -207,6 +232,84 @@ class CloudArchitectAgent
 
         if ($missing !== []) {
             throw InvalidAnalysisException::unexpectedShape(['Missing: '.implode(', ', $missing).'.']);
+        }
+    }
+
+    /**
+     * Takes the variables Cloud Run reserves out of the environment files and of
+     * the list of variables, and says so in the warnings the reviewer reads. They
+     * are line-based files where dropping a line is always the right repair, so a
+     * `PORT=8080` does not cost the owner a deployment or a second analysis.
+     *
+     * @param  array<string, mixed>  $analysis
+     * @return array<string, mixed>
+     */
+    private function withoutReservedVariables(array $analysis): array
+    {
+        $reserved = implode('|', self::RESERVED_VARIABLES);
+        $removed = [];
+
+        foreach ($analysis['files'] as $index => $file) {
+            if (! str_starts_with($file['path'], 'deployer/env/')) {
+                continue;
+            }
+
+            $analysis['files'][$index]['content'] = (string) preg_replace_callback(
+                "/^[ \t]*(?:export[ \t]+)?({$reserved})[ \t]*=.*(?:\R|\z)/m",
+                function (array $match) use ($file, &$removed): string {
+                    $removed[] = "{$match[1]} de {$file['path']}";
+
+                    return '';
+                },
+                $file['content'],
+            );
+        }
+
+        $analysis['env_vars'] = array_values(array_filter(
+            $analysis['env_vars'],
+            fn (array $variable): bool => ! in_array($variable['name'], self::RESERVED_VARIABLES, true),
+        ));
+
+        if ($removed !== []) {
+            $analysis['warnings'][] = 'Se quitó '.implode(', ', array_unique($removed)).': Cloud Run define esas variables por su cuenta y rechaza un despliegue que las declare.';
+        }
+
+        return $analysis;
+    }
+
+    /**
+     * What Cloud Run would refuse or serve wrongly once the manifests reach it,
+     * caught here instead of minutes into a deployment: a reserved variable
+     * written by hand in a manifest, and a public service whose manifest does
+     * not open it, which would answer 403 to every visitor.
+     *
+     * @param  array<string, mixed>  $analysis
+     *
+     * @throws InvalidAnalysisException
+     */
+    private function assertAcceptedByCloudRun(array $analysis): void
+    {
+        /** @var array<string, string> $contents */
+        $contents = array_column($analysis['files'], 'content', 'path');
+        $reserved = implode('|', self::RESERVED_VARIABLES);
+        $annotation = preg_quote(self::PUBLIC_ANNOTATION, '/');
+        $problems = [];
+
+        foreach ($analysis['services'] as $service) {
+            $manifest = 'deployer/'.($service['kind'] === 'job' ? 'jobs' : 'services')."/{$service['name']}.yaml";
+            $content = $contents[$manifest] ?? '';
+
+            if (preg_match("/^\s*-\s*name:\s*[\"']?({$reserved})[\"']?\s*$/m", $content, $match) === 1) {
+                $problems[] = "{$manifest} declares {$match[1]}, which Cloud Run sets itself.";
+            }
+
+            if ($service['kind'] === 'service' && $service['public'] && preg_match("/{$annotation}:\s*[\"']?true/", $content) !== 1) {
+                $problems[] = "{$manifest} is public but lacks the annotation ".self::PUBLIC_ANNOTATION.'.';
+            }
+        }
+
+        if ($problems !== []) {
+            throw InvalidAnalysisException::unexpectedShape($problems);
         }
     }
 
