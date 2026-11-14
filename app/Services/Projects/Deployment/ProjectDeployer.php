@@ -34,6 +34,11 @@ class ProjectDeployer
      * The bucket keeps no file modes, so the scripts arrive without their
      * executable bit: it is put back, since one script may call another directly.
      *
+     * The preparation is tried up to three times. Google Cloud is eventually
+     * consistent: a service account just created may not exist yet for the
+     * command that grants it a role, and the script ends there. Its steps check
+     * before they create, so running it again picks up where it failed.
+     *
      * Between preparing the project and deploying, the platform itself lets the
      * project's default build identity build images: in a new project of this
      * organization it starts with no permissions at all, and `gcloud builds
@@ -49,7 +54,16 @@ class ProjectDeployer
         gcloud storage rsync --recursive "gs://$BUCKET/$APPROVED_PREFIX" .
         find deployer -type f -name '*.sh' -exec chmod +x {} +
         echo "::deployer:: 35 Preparando la infraestructura del proyecto $PROJECT (deployer/setup.sh)"
-        sh deployer/setup.sh
+        ATTEMPT=1
+        until sh deployer/setup.sh; do
+          if [ "$ATTEMPT" -ge 3 ]; then
+            echo "La preparación de la infraestructura falló $ATTEMPT veces seguidas."
+            exit 1
+          fi
+          ATTEMPT=$((ATTEMPT + 1))
+          echo "La preparación falló; puede ser un recurso recién creado que aún no se propaga. Reintentando en 20 s (intento $ATTEMPT de 3)..."
+          sleep 20
+        done
         echo "::deployer:: 55 Dando permisos a la identidad que construye la imagen"
         NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
         BUILDER="serviceAccount:$NUMBER-compute@developer.gserviceaccount.com"

@@ -1,6 +1,8 @@
 <?php
 
 use App\Enums\ProjectStatus;
+use App\Events\Projects\ProjectProgressed;
+use App\Exceptions\Projects\DeploymentException;
 use App\Jobs\DeployProject;
 use App\Jobs\WatchProjectDeployment;
 use App\Models\Project;
@@ -9,8 +11,6 @@ use App\Models\User;
 use App\Services\Projects\Deployment\Contracts\DeploymentRunner;
 use App\Services\Projects\Deployment\DeploymentState;
 use App\Services\Projects\Deployment\ProjectDeployer;
-use App\Events\Projects\ProjectProgressed;
-use App\Exceptions\Projects\DeploymentException;
 use App\Services\Projects\ProjectAnalyzer;
 use App\Services\Projects\ProjectProgress;
 use Illuminate\Support\Facades\Event;
@@ -191,7 +191,7 @@ test('the deployment runs the approved snapshot in the cloud project of the proj
         'REGION' => 'us-central1',
     ])
         ->and(implode(' ', $runner->environment))->not->toContain('gho-access')
-        ->and($runner->script)->toContain('sh deployer/setup.sh', 'sh deployer/deploy.sh')
+        ->and($runner->script)->toContain('until sh deployer/setup.sh; do', 'sh deployer/deploy.sh')
         ->and($project->fresh()->deployment_build_id)->toBe('build-1');
 
     Queue::assertPushed(WatchProjectDeployment::class);
@@ -407,4 +407,3 @@ test('looks that keep failing end the deployment as failed instead of leaving it
         ->status->toBe(ProjectStatus::Failed)
         ->failure_reason->toBe('Deployer could not follow the deployment: boom');
 });
-
