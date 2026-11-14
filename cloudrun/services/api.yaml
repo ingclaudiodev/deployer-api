@@ -33,10 +33,10 @@ spec:
         run.googleapis.com/cpu-throttling: 'false'
         # CPU extra durante el arranque: `php artisan optimize` + Swoole en frío.
         run.googleapis.com/startup-cpu-boost: 'true'
-        # Direct VPC egress: la instancia toma una IP de la subred para llegar a la VM (Postgres por
-        # el túnel y Redis). Solo los rangos privados van por la VPC; ZeptoMail, Slack y Reverb
+        # Direct VPC egress: la instancia toma una IP de la subred exclusiva de Cloud Run para llegar a la VM de
+        # datos (PostgreSQL y Redis). Solo los rangos privados van por la VPC; ZeptoMail, Slack y Reverb
         # salen directo a Internet, sin Cloud NAT.
-        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${SUBNET}","tags":["${RUN_TAG}"]}]'
+        run.googleapis.com/network-interfaces: '[{"network":"${NETWORK}","subnetwork":"${RUN_SUBNET}","tags":["${RUN_TAG}"]}]'
         run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
       serviceAccountName: ${RUN_SA_EMAIL}
