@@ -68,6 +68,36 @@ test('it rejects an analysis Cloud Run would not accept', function (array $overr
     'service without its manifest' => [['services' => [['name' => 'worker']]]],
 ])->throws(InvalidAnalysisException::class, 'expected structure');
 
+test('it takes out the variables Cloud Run reserves and tells the reviewer', function (): void {
+    fakeGenerativeModel(analysisJson([
+        'files' => [6 => ['path' => 'deployer/env/common.env', 'content' => "NODE_ENV=production\nPORT=8080\nexport K_SERVICE=orders\nREPORT=1\n"]],
+        'env_vars' => [2 => ['name' => 'PORT', 'description' => 'Puerto HTTP', 'secret' => false]],
+    ]));
+
+    $analysis = app(CloudArchitectAgent::class)->analyze(['repository' => 'acme/orders-api']);
+
+    expect(collect($analysis['files'])->firstWhere('path', 'deployer/env/common.env')['content'])->toBe("NODE_ENV=production\nREPORT=1\n")
+        ->and(array_column($analysis['env_vars'], 'name'))->toBe(['DATABASE_URL', 'LOG_LEVEL'])
+        ->and(last($analysis['warnings']))->toContain('PORT de deployer/env/common.env', 'K_SERVICE');
+});
+
+test('it leaves the warnings alone when nothing reserved was declared', function (): void {
+    fakeGenerativeModel(analysisJson());
+
+    $analysis = app(CloudArchitectAgent::class)->analyze(['repository' => 'acme/orders-api']);
+
+    expect($analysis['warnings'])->toBe(['BullMQ necesita un worker siempre encendido.']);
+});
+
+test('it rejects a manifest Cloud Run would refuse or serve closed', function (array $overrides): void {
+    fakeGenerativeModel(analysisJson($overrides));
+
+    app(CloudArchitectAgent::class)->analyze(['repository' => 'acme/orders-api']);
+})->with([
+    'reserved variable written in the manifest' => [['files' => [4 => ['content' => "kind: Service\nmetadata:\n  annotations:\n    run.googleapis.com/invoker-iam-disabled: 'true'\nspec:\n  template:\n    spec:\n      containers:\n        - env:\n            - name: PORT\n              value: '8080'"]]]],
+    'public service its manifest does not open' => [['files' => [4 => ['content' => 'kind: Service']]]],
+])->throws(InvalidAnalysisException::class, 'expected structure');
+
 test('it lets a failure of the model reach the caller', function (): void {
     fakeGenerativeModel(GenerativeModelException::incompleteAnswer('MAX_TOKENS'));
 
